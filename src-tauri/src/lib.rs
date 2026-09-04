@@ -27,7 +27,7 @@ pub struct AppState {
 // ==========================================
 
 #[tauri::command]
-pub fn execute_shell_command(
+fn execute_shell_command(
     state: State<'_, Mutex<AppState>>,
     cmd: String,
     cwd: String,
@@ -38,7 +38,7 @@ pub fn execute_shell_command(
 }
 
 #[tauri::command]
-pub fn fs_read_file(
+fn fs_read_file(
     state: State<'_, Mutex<AppState>>,
     path: String,
 ) -> Result<String, String> {
@@ -47,7 +47,7 @@ pub fn fs_read_file(
 }
 
 #[tauri::command]
-pub fn fs_write_file(
+fn fs_write_file(
     state: State<'_, Mutex<AppState>>,
     path: String,
     content: String,
@@ -58,7 +58,7 @@ pub fn fs_write_file(
 }
 
 #[tauri::command]
-pub fn fs_list_dir(
+fn fs_list_dir(
     state: State<'_, Mutex<AppState>>,
     path: String,
 ) -> Vec<FileNode> {
@@ -67,7 +67,7 @@ pub fn fs_list_dir(
 }
 
 #[tauri::command]
-pub fn fs_create_dir(
+fn fs_create_dir(
     state: State<'_, Mutex<AppState>>,
     path: String,
 ) -> Result<FileNode, String> {
@@ -76,7 +76,7 @@ pub fn fs_create_dir(
 }
 
 #[tauri::command]
-pub fn fs_remove_path(
+fn fs_remove_path(
     state: State<'_, Mutex<AppState>>,
     path: String,
     recursive: bool,
@@ -86,32 +86,32 @@ pub fn fs_remove_path(
 }
 
 #[tauri::command]
-pub fn distro_list_all() -> Vec<DistroInfo> {
+fn distro_list_all() -> Vec<DistroInfo> {
     get_supported_distros()
 }
 
 #[tauri::command]
-pub fn distro_get_info(distro_id: String) -> Option<DistroInfo> {
+fn distro_get_info(distro_id: String) -> Option<DistroInfo> {
     get_distro_by_id(&distro_id)
 }
 
 #[tauri::command]
-pub fn ai_generate_command(request: AiGenerateRequest) -> AiGenerateResponse {
+fn ai_generate_command(request: AiGenerateRequest) -> AiGenerateResponse {
     AiEngine::generate_fallback(&request)
 }
 
 #[tauri::command]
-pub fn system_get_telemetry(distro_id: String) -> SystemTelemetry {
+fn system_get_telemetry(distro_id: String) -> SystemTelemetry {
     SystemMonitor::get_telemetry(&distro_id)
 }
 
 #[tauri::command]
-pub fn system_list_processes() -> Vec<ProcessItem> {
+fn system_list_processes() -> Vec<ProcessItem> {
     SystemMonitor::list_processes()
 }
 
 #[tauri::command]
-pub fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo {
+fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo {
     let app_state = state.lock().unwrap();
     TauriBackendInfo {
         tauri_version: "2.0.0".to_string(),

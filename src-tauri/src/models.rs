@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// Type de nœud dans le système de fichiers virtuel POSIX
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
