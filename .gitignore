@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Rust / Tauri build artifacts (src-tauri)
+src-tauri/target/
+src-tauri/gen/
+# NOTE: src-tauri/Cargo.lock is intentionally COMMITTED (reproducible builds for the Rust backend)
