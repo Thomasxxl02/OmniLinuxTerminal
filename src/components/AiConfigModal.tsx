@@ -28,7 +28,7 @@ import {
   Code2,
   TerminalSquare,
 } from 'lucide-react';
-import { AiConfig } from '../types';
+import { AiConfig, backendProviderIdForModel, BackendProviderId } from '../types';
 
 interface AiConfigModalProps {
   config: AiConfig;
@@ -303,6 +303,18 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
   const [customApiKey, setCustomApiKey] = useState<string>(config.customApiKey || '');
   const [customEndpoint, setCustomEndpoint] = useState<string>(config.customEndpoint || '');
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>(config.apiKeys || {});
+
+  // Providers that need an API key (mirrors the backend registry).
+  const KEY_PROVIDERS: Array<{ id: BackendProviderId; label: string; hint: string }> = [
+    { id: 'google', label: 'Gemini', hint: 'aistudio.google.com/apikey' },
+    { id: 'deepseek', label: 'DeepSeek', hint: 'platform.deepseek.com' },
+    { id: 'mistral', label: 'Mistral AI', hint: 'console.mistral.ai' },
+    { id: 'anthropic', label: 'Anthropic', hint: 'console.anthropic.com' },
+    { id: 'openai', label: 'OpenAI', hint: 'platform.openai.com' },
+    { id: 'qwen', label: 'Alibaba Qwen', hint: 'dashscope.aliyuncs.com' },
+    { id: 'llama', label: 'LLaMA (OpenRouter)', hint: 'openrouter.ai/keys' },
+  ];
 
   // Filters & Search
   const [providerFilter, setProviderFilter] = useState<
@@ -333,6 +345,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
 
   const currentEffectiveModel = selectedModel === 'custom' ? (customModelInput.trim() || 'gemini-3.8-flash') : selectedModel;
   const currentModelSpec = AVAILABLE_MODELS.find((m) => m.id === currentEffectiveModel);
+  const activeProviderId = backendProviderIdForModel(currentEffectiveModel);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -386,7 +399,8 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: currentEffectiveModel,
-          apiKey: isCustomKeyEnabled && customApiKey.trim() ? customApiKey.trim() : undefined,
+          apiKey: (apiKeys[activeProviderId] || '').trim() || (isCustomKeyEnabled && customApiKey.trim() ? customApiKey.trim() : undefined),
+          customEndpoint: customEndpoint.trim() || undefined,
           samplePrompt: testSampleEnabled ? sampleQuery : undefined,
         }),
       });
@@ -425,6 +439,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
       isCustomKeyEnabled,
       customApiKey: customApiKey.trim(),
       customEndpoint: customEndpoint.trim(),
+      apiKeys,
       temperature,
       persona,
       safetyFilter,
@@ -1001,6 +1016,33 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
                     placeholder="Ex: http://localhost:11434 ou https://api.openai.com/v1"
                     className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500"
                   />
+                </div>
+
+                {/* Per-provider API keys (BYOK) */}
+                <div className="space-y-1 pt-1 border-t border-zinc-800">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-zinc-300 flex items-center gap-1">
+                      <Key className="w-3 h-3 text-zinc-400" /> Clés API par fournisseur :
+                    </span>
+                    <span className="text-zinc-500 text-[10px]">la clé du fournisseur du modèle sélectionné est transmise</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {KEY_PROVIDERS.map((p) => (
+                      <div key={p.id} className="space-y-0.5">
+                        <div className="flex items-center justify-between text-[10px]">
+                          <span className="text-zinc-300">{p.label}</span>
+                          <span className="text-zinc-500">{p.hint}</span>
+                        </div>
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={apiKeys[p.id] || ''}
+                          onChange={(e) => setApiKeys((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                          placeholder={`Clé ${p.label}`}
+                          className="w-full px-2 py-1.5 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 font-mono text-[11px] focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             ) : (

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Sparkles, Terminal, Copy, Check, Play, HelpCircle, AlertTriangle, ArrowRight, ShieldCheck, Settings, Key } from 'lucide-react';
-import { DistroId, AiConfig } from '../types';
+import { DistroId, AiConfig, backendProviderIdForModel } from '../types';
 
 interface AiCopilotDrawerProps {
   distroId: DistroId;
@@ -45,9 +45,13 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
     setTimeout(() => setCopiedText(''), 2000);
   };
 
-  const currentApiKey = aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
-    ? aiConfig.customApiKey.trim()
-    : undefined;
+  const activeProviderId = backendProviderIdForModel(aiConfig.model);
+  const currentApiKey =
+    (aiConfig.apiKeys?.[activeProviderId] || '').trim() ||
+    (aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
+      ? aiConfig.customApiKey.trim()
+      : undefined);
+  const currentCustomEndpoint = aiConfig.customEndpoint?.trim() || undefined;
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,6 +69,7 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
           currentDir: cwd,
           model: aiConfig.model,
           apiKey: currentApiKey,
+          customEndpoint: currentCustomEndpoint,
           temperature: aiConfig.temperature,
           persona: aiConfig.persona,
         }),
@@ -93,6 +98,7 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
           distro: distroId,
           model: aiConfig.model,
           apiKey: currentApiKey,
+          customEndpoint: currentCustomEndpoint,
           temperature: aiConfig.temperature,
           persona: aiConfig.persona,
         }),
@@ -122,6 +128,7 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
           distro: distroId,
           model: aiConfig.model,
           apiKey: currentApiKey,
+          customEndpoint: currentCustomEndpoint,
           temperature: aiConfig.temperature,
           persona: aiConfig.persona,
         }),

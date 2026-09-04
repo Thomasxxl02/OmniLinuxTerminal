@@ -1,4 +1,4 @@
-import { DistroId, FileNode } from '../types';
+import { DistroId, FileNode, TerminalTab, HistoryLine } from '../types';
 
 /**
  * Interface pour les statistiques d'appel IPC Tauri v2
@@ -144,4 +144,139 @@ function handleBridgeCall<T>(cmd: string, args: Record<string, any>): T {
     default:
       return null as unknown as T;
   }
+}
+
+// ===========================================================================
+// Contrat terminal Rust (Phase 2) : CommandResult + effets
+// ===========================================================================
+
+export interface TerminalEffect {
+  kind:
+    | 'openEditor'
+    | 'clearScreen'
+    | 'launchApp'
+    | 'setCwd'
+    | 'print'
+    | 'installPackage'
+    | 'switchDistro';
+  editor?: string;
+  path?: string;
+  content?: string;
+  isNewFile?: boolean;
+  app?: string;
+  cwd?: string;
+  package?: string;
+  distroId?: string;
+  text?: string;
+}
+
+export interface CommandResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  cwd: string;
+  effects: TerminalEffect[];
+}
+
+/** Exécute une commande via le moteur Rust (terminal_execute). */
+export async function runTerminalCommand(cmd: string, cwd: string, distroId: string): Promise<CommandResult> {
+  try {
+    const res = await tauriInvoke<CommandResult | null>('terminal_execute', { cmd, cwd, distroId });
+    if (res && typeof res === 'object' && 'stdout' in (res as object)) {
+      return res;
+    }
+    return {
+      stdout: '',
+      stderr: 'Backend natif non disponible (mode navigateur). Lancez l\'application via Tauri.',
+      exitCode: 1,
+      cwd,
+      effects: [],
+    };
+  } catch (err) {
+    return {
+      stdout: '',
+      stderr: String((err as any)?.message || err),
+      exitCode: 1,
+      cwd,
+      effects: [],
+    };
+  }
+}
+
+/**
+ * Applique un CommandResult Rust à l'état d'un onglet terminal.
+ * La décision (effets) vient de Rust ; React ne fait que l'afficher.
+ */
+export function applyTerminalResult(
+  result: CommandResult,
+  tab: TerminalTab,
+  newHistory: HistoryLine[],
+  cmdHistory: string[],
+): Partial<TerminalTab> {
+  if (result.effects.some((e) => e.kind === 'clearScreen')) {
+    return { history: [], commandHistory: cmdHistory, activeApp: 'none' };
+  }
+
+  let finalHistory = newHistory;
+  const outText = result.stdout || result.stderr;
+  if (outText) {
+    finalHistory = [
+      ...newHistory,
+      {
+        id: `out-${Date.now()}`,
+        type: result.exitCode !== 0 ? 'error' : 'output',
+        content: outText,
+        cwd: result.cwd,
+        distroId: tab.distroId,
+      },
+    ];
+  }
+
+  let nextCwd = result.cwd || tab.cwd;
+  let nextDistro = tab.distroId;
+  let nextInstalled = tab.installedPackages;
+  let activeEditor = tab.activeEditor;
+  let activeApp = tab.activeApp;
+
+  for (const e of result.effects) {
+    switch (e.kind) {
+      case 'setCwd':
+        if (e.cwd) nextCwd = e.cwd;
+        break;
+      case 'switchDistro':
+        if (e.distroId) nextDistro = e.distroId as DistroId;
+        break;
+      case 'installPackage':
+        if (e.package) nextInstalled = [...new Set([...nextInstalled, e.package])];
+        break;
+      case 'launchApp':
+        activeApp = (e.app as 'htop' | 'matrix' | 'sl') || 'none';
+        break;
+      case 'openEditor':
+        activeEditor = {
+          type: e.editor === 'vim' ? 'vim' : 'nano',
+          filePath: e.path || '',
+          fileContent: e.content || '',
+          isNewFile: !!e.isNewFile,
+        };
+        break;
+      case 'print':
+        if (e.text) {
+          finalHistory = [...finalHistory, { id: `out-${Date.now()}`, type: 'output', content: e.text }];
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    history: finalHistory,
+    commandHistory: cmdHistory,
+    cwd: nextCwd,
+    distroId: nextDistro,
+    installedPackages: nextInstalled,
+    activeEditor,
+    activeApp,
+  };
 }

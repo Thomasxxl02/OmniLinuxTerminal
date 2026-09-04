@@ -116,3 +116,66 @@ pub struct TauriBackendInfo {
     pub virtual_fs_nodes: usize,
     pub supported_distros: usize,
 }
+
+// ===========================================================================
+// Contrat IPC stable (Phase 2 / 6) — nouvelle source de vérité pour le frontend
+// ===========================================================================
+
+/// Résultat unifié d'exécution d'une commande (remplace CommandExecutionResult).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub cwd: String,
+    pub effects: Vec<TerminalEffect>,
+}
+
+/// Effet que Rust demande au frontend d'exécuter. La décision vient de Rust,
+/// React ne fait que le rendu (ouvrir un éditeur, effacer l'écran, lancer une app...).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum TerminalEffect {
+    OpenEditor {
+        editor: String,
+        path: String,
+        content: Option<String>,
+        is_new_file: bool,
+    },
+    ClearScreen,
+    LaunchApp {
+        app: String,
+    },
+    SetCwd {
+        cwd: String,
+    },
+    Print {
+        text: String,
+    },
+    InstallPackage {
+        package: String,
+    },
+    SwitchDistro {
+        distro_id: String,
+    },
+}
+
+/// Niveau de risque d'une commande (Phase 6 — module security).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RiskLevel {
+    Safe,
+    Caution,
+    Dangerous,
+    Blocked,
+}
+
+/// Évaluation de sécurité structurée d'une commande (Phase 6).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafetyAssessment {
+    pub level: RiskLevel,
+    pub reasons: Vec<String>,
+    pub requires_confirmation: bool,
+}

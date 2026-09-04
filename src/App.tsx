@@ -18,7 +18,7 @@ import { HelpModal } from './components/HelpModal';
 import { AboutModal } from './components/AboutModal';
 import { TauriArchitectureModal } from './components/TauriArchitectureModal';
 import { vfs, createInitialFS } from './lib/filesystem';
-import { executeCommand } from './lib/commandExecutor';
+import { runTerminalCommand, applyTerminalResult } from './lib/tauriBridge';
 
 export default function App() {
   // Theme & Appearance State
@@ -247,46 +247,8 @@ export default function App() {
     ];
     const updatedCmdHistory = [...activeTab.commandHistory, cmd];
 
-    const result = await executeCommand(cmd, activeTab, handleAiRequest);
-
-    if (result.clear) {
-      handleUpdateTab({
-        history: [],
-        commandHistory: updatedCmdHistory,
-        activeApp: 'none',
-      });
-      return;
-    }
-
-    let finalHistory = newHistory;
-    if (result.text) {
-      finalHistory = [
-        ...newHistory,
-        {
-          id: `out-${Date.now()}`,
-          type: (result.exitCode && result.exitCode !== 0 ? 'error' : 'output') as 'error' | 'output',
-          content: result.text,
-          cwd: result.newCwd || activeTab.cwd,
-          distroId: result.switchedDistro || activeTab.distroId,
-        },
-      ];
-    }
-
-    const nextCwd = result.newCwd || activeTab.cwd;
-    const nextDistro = result.switchedDistro || activeTab.distroId;
-    const nextInstalled = result.installedPackage
-      ? [...activeTab.installedPackages, result.installedPackage]
-      : activeTab.installedPackages;
-
-    handleUpdateTab({
-      history: finalHistory,
-      commandHistory: updatedCmdHistory,
-      cwd: nextCwd,
-      distroId: nextDistro,
-      installedPackages: nextInstalled,
-      activeEditor: result.activeEditor !== undefined ? result.activeEditor : activeTab.activeEditor,
-      activeApp: result.activeApp !== undefined ? result.activeApp : activeTab.activeApp,
-    });
+    const result = await runTerminalCommand(cmd, activeTab.cwd, activeTab.distroId);
+    handleUpdateTab(applyTerminalResult(result, activeTab, newHistory, updatedCmdHistory));
   };
 
   // Reset virtual filesystem
@@ -611,7 +573,6 @@ export default function App() {
               soundEnabled={soundEnabled}
               soundStyle={soundStyle}
               onUpdateTab={handleUpdateTab}
-              onAiRequest={handleAiRequest}
             />
           )}
 

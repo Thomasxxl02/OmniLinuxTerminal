@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle } from '../types';
 import { LINUX_DISTROS } from '../data/distros';
-import { executeCommand } from '../lib/commandExecutor';
+import { runTerminalCommand, applyTerminalResult } from '../lib/tauriBridge';
 import { playTerminalSound } from '../lib/soundEffects';
 import { Copy, Trash2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
 
@@ -12,7 +12,6 @@ interface TerminalViewProps {
   soundEnabled: boolean;
   soundStyle?: TerminalSoundStyle;
   onUpdateTab: (updated: Partial<TerminalTab>) => void;
-  onAiRequest: (type: 'generate' | 'explain' | 'debug', query: string) => Promise<any>;
 }
 
 export const TerminalView: React.FC<TerminalViewProps> = ({
@@ -22,7 +21,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   soundEnabled,
   soundStyle = 'mechanical',
   onUpdateTab,
-  onAiRequest,
 }) => {
   const [inputVal, setInputVal] = useState('');
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
@@ -85,45 +83,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const updatedCmdHistory = [...tab.commandHistory, command];
 
     setIsExecuting(true);
-    const result = await executeCommand(command, tab, onAiRequest);
+    const result = await runTerminalCommand(command, tab.cwd, tab.distroId);
     setIsExecuting(false);
 
-    if (result.clear) {
-      onUpdateTab({
-        history: [],
-        commandHistory: updatedCmdHistory,
-        activeApp: 'none',
-      });
-      return;
-    }
-
-    let finalHistory = newHistory;
-    if (result.text) {
-      finalHistory = [
-        ...newHistory,
-        {
-          id: `out-${Date.now()}`,
-          type: 'output' as const,
-          content: result.text,
-        },
-      ];
-    }
-
-    const nextCwd = result.newCwd || tab.cwd;
-    const nextDistro = result.switchedDistro || tab.distroId;
-    const nextInstalled = result.installedPackage
-      ? [...tab.installedPackages, result.installedPackage]
-      : tab.installedPackages;
-
-    onUpdateTab({
-      history: finalHistory,
-      commandHistory: updatedCmdHistory,
-      cwd: nextCwd,
-      distroId: nextDistro,
-      installedPackages: nextInstalled,
-      activeEditor: result.activeEditor !== undefined ? result.activeEditor : tab.activeEditor,
-      activeApp: result.activeApp !== undefined ? result.activeApp : tab.activeApp,
-    });
+    onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
   };
 
   // Keyboard navigation & tab autocompletion
@@ -139,10 +102,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     if (e.key === 'Tab') {
       e.preventDefault();
       const availableCmds = [
-        'help', 'man', 'neofetch', 'fastfetch', 'htop', 'top', 'ls', 'cd', 'pwd', 'mkdir', 'touch', 'rm',
-        'cat', 'nano', 'vim', 'vi', 'clear', 'history', 'whoami', 'hostname', 'uname', 'date', 'uptime',
-        'cmatrix', 'sl', 'cowsay', 'fortune', 'apt', 'pacman', 'dnf', 'apk', 'zypper', 'xbps-install',
-        'nix-env', 'distro', 'ai', 'ping', 'curl', 'python3', 'node'
+        'help', 'man', 'neofetch', 'htop', 'top', 'ls', 'cd', 'pwd', 'mkdir', 'touch', 'rm', 'cp', 'mv',
+        'cat', 'head', 'tail', 'grep', 'tree', 'nano', 'vim', 'vi', 'clear', 'whoami', 'hostname',
+        'uname', 'date', 'uptime', 'cmatrix', 'sl', 'apt', 'apt-get', 'pacman', 'dnf', 'yum', 'apk',
+        'zypper', 'distro', 'tauri', 'cargo', 'rustc'
       ];
       const match = availableCmds.find((c) => c.startsWith(inputVal));
       if (match) {

@@ -9,12 +9,12 @@ use ai::AiEngine;
 use distro::{get_distro_by_id, get_supported_distros};
 use fs::VirtualFileSystem;
 use models::{
-    AiGenerateRequest, AiGenerateResponse, CommandExecutionResult, DistroInfo, FileNode,
-    ProcessItem, SystemTelemetry, TauriBackendInfo,
+    AiGenerateRequest, AiGenerateResponse, CommandResult, DistroInfo, FileNode, ProcessItem,
+    SystemTelemetry, TauriBackendInfo,
 };
 use std::sync::Mutex;
 use system::SystemMonitor;
-use tauri::State;
+use tauri::{Manager, State};
 use terminal::ShellExecutor;
 
 pub struct AppState {
@@ -32,7 +32,7 @@ fn execute_shell_command(
     cmd: String,
     cwd: String,
     distro_id: String,
-) -> CommandExecutionResult {
+) -> CommandResult {
     let app_state = state.lock().unwrap();
     app_state.executor.execute(&cmd, &cwd, &distro_id, &[])
 }
@@ -125,17 +125,94 @@ fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo
 }
 
 // ==========================================
+// CONTRAT IPC STABLE (Phase 1) — noms canoniques
+// Ces commandes délèguent aux moteurs existants. Les anciens noms restent
+// fonctionnels ; le frontend migre vers ces noms en Phase 2.
+// ==========================================
+
+#[tauri::command]
+fn terminal_execute(
+    state: State<'_, Mutex<AppState>>,
+    cmd: String,
+    cwd: String,
+    distro_id: String,
+) -> CommandResult {
+    let app_state = state.lock().unwrap();
+    app_state.executor.execute(&cmd, &cwd, &distro_id, &[])
+}
+
+#[tauri::command]
+fn fs_read(
+    state: State<'_, Mutex<AppState>>,
+    path: String,
+) -> Result<String, String> {
+    let app_state = state.lock().unwrap();
+    app_state.vfs.read_file(&path)
+}
+
+#[tauri::command]
+fn fs_write(
+    state: State<'_, Mutex<AppState>>,
+    path: String,
+    content: String,
+    append: bool,
+) -> Result<FileNode, String> {
+    let app_state = state.lock().unwrap();
+    app_state.vfs.write_file(&path, &content, append)
+}
+
+#[tauri::command]
+fn fs_list(
+    state: State<'_, Mutex<AppState>>,
+    path: String,
+) -> Vec<FileNode> {
+    let app_state = state.lock().unwrap();
+    app_state.vfs.list_dir(&path)
+}
+
+#[tauri::command]
+fn fs_remove(
+    state: State<'_, Mutex<AppState>>,
+    path: String,
+    recursive: bool,
+) -> Result<(), String> {
+    let app_state = state.lock().unwrap();
+    app_state.vfs.remove_path(&path, recursive)
+}
+
+#[tauri::command]
+fn distro_get_current(state: State<'_, Mutex<AppState>>) -> String {
+    let app_state = state.lock().unwrap();
+    // Le VFS Rust ne stocke pas encore la distro active : défaut Ubuntu.
+    let _ = &app_state;
+    "ubuntu".to_string()
+}
+
+// ==========================================
 // TAURI APPLICATION RUNNER
 // ==========================================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let vfs = VirtualFileSystem::new();
-    let executor = ShellExecutor::new(vfs.clone());
-    let state = AppState { vfs, executor };
-
     tauri::Builder::default()
-        .manage(Mutex::new(state))
+        .setup(|app| {
+            // Répertoire de données de l'app : le VFS y est persisté (Phase 3).
+            let data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Impossible de résoudre le répertoire de données : {}", e))?;
+            std::fs::create_dir_all(&data_dir)
+                .map_err(|e| format!("Impossible de créer le répertoire de données : {}", e))?;
+            let persist = data_dir.join("vfs.json");
+
+            let vfs = VirtualFileSystem::new();
+            vfs.set_persist_path(&persist.to_string_lossy());
+            vfs.load_or_initialize(&persist.to_string_lossy());
+
+            let executor = ShellExecutor::new(vfs.clone());
+            app.manage(Mutex::new(AppState { vfs, executor }));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             execute_shell_command,
             fs_read_file,
@@ -149,6 +226,13 @@ pub fn run() {
             system_get_telemetry,
             system_list_processes,
             tauri_get_backend_info,
+            // Contrat IPC stable (Phase 1)
+            terminal_execute,
+            fs_read,
+            fs_write,
+            fs_list,
+            fs_remove,
+            distro_get_current,
         ])
         .run(tauri::generate_context!())
         .expect("Erreur lors de l'exécution de l'application Tauri v2");

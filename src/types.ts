@@ -127,7 +127,29 @@ export interface AiConfig {
   customApiKey?: string;
   isCustomKeyEnabled: boolean;
   customEndpoint?: string;
+  apiKeys?: Record<string, string>;
   temperature?: number;
   persona?: 'sysadmin' | 'educational' | 'security';
   safetyFilter?: boolean;
 }
+
+// Mirrors the backend provider registry in server.ts: maps an app model id
+// to the real provider that actually serves it.
+export type BackendProviderId =
+  | 'google' | 'deepseek' | 'mistral' | 'anthropic' | 'openai'
+  | 'qwen' | 'llama' | 'ollama' | 'custom';
+
+export function backendProviderIdForModel(modelId?: string): BackendProviderId {
+  const id = (modelId || '').trim();
+  if (!id) return 'google';
+  if (id.startsWith('gemini-')) return 'google';
+  if (id.startsWith('deepseek-')) return 'deepseek';
+  if (id.startsWith('codestral') || id.startsWith('mistral-')) return 'mistral';
+  if (id.startsWith('claude-')) return 'anthropic';
+  if (id === 'gpt-4o' || id === 'o3-mini') return 'openai';
+  if (id === 'qwen2.5-coder-32b') return 'qwen';
+  if (id.includes('llama')) return 'llama';
+  if (id === 'ollama-local') return 'ollama';
+  return 'custom';
+}
+
