@@ -11,7 +11,7 @@
     "clean": "rm -rf dist server.mjs",
     "lint": "tsc --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "fuser -k 3000/tcp 24678/tcp 2>/dev/null; tauri dev",
     "tauri:build": "tauri build"
   },
   "dependencies": {

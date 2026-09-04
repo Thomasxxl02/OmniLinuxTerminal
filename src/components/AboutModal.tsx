@@ -43,7 +43,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ onClose }) => {
           <div className="bg-zinc-950/80 p-3 rounded-lg border border-zinc-800 space-y-2">
             <div className="flex justify-between items-center text-zinc-400">
               <span>Noyau Virtuel</span>
-              <span className="font-mono text-emerald-400">6.8.0-universal-vfs</span>
+              <span className="font-mono text-emerald-400">6.8.0-universal</span>
             </div>
             <div className="flex justify-between items-center text-zinc-400">
               <span>Distributions Incluses</span>

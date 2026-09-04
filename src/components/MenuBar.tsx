@@ -1790,7 +1790,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
                   <div className="my-1 border-t border-[#27272A]" />
 
-                  {/* Reset Distro filesystem */}
+                  {/* Réinitialiser la distribution */}
                   <button
                     onClick={() => executeAndClose(onResetSystem)}
                     className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-red-600 hover:text-white transition text-left text-rose-400"

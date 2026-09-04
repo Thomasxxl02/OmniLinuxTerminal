@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { vfs } from '../lib/filesystem';
+import { fsWrite, errMsg } from '../lib/fsApi';
 import { Save, X, HelpCircle, FileText } from 'lucide-react';
 
 interface NanoEditorProps {
@@ -17,10 +17,14 @@ export const NanoEditor: React.FC<NanoEditorProps> = ({
   const [message, setMessage] = useState<string>('');
   const fileName = filePath.split('/').pop() || filePath;
 
-  const handleSave = () => {
-    const dirPath = vfs.normalizePath(filePath + '/..');
-    vfs.createFile(dirPath, fileName, content);
-    setMessage(`[ Écrit ${content.length} octets dans '${fileName}' ]`);
+  const handleSave = async () => {
+    try {
+      // filePath provient déjà normalisé de l'effet Rust openEditor.
+      await fsWrite(filePath, content, false);
+      setMessage(`[ Écrit ${content.length} octets dans '${fileName}' ]`);
+    } catch (e) {
+      setMessage(`[ Échec de l'écriture : ${errMsg(e)} ]`);
+    }
     setTimeout(() => setMessage(''), 3000);
   };
 

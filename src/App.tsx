@@ -17,8 +17,8 @@ import { DistroInfoModal } from './components/DistroInfoModal';
 import { HelpModal } from './components/HelpModal';
 import { AboutModal } from './components/AboutModal';
 import { TauriArchitectureModal } from './components/TauriArchitectureModal';
-import { vfs, createInitialFS } from './lib/filesystem';
 import { runTerminalCommand, applyTerminalResult } from './lib/tauriBridge';
+import { fsReset, fsExport, fsImport, fsUpdateOSRelease, errMsg } from './lib/fsApi';
 
 export default function App() {
   // Theme & Appearance State
@@ -251,13 +251,10 @@ export default function App() {
     handleUpdateTab(applyTerminalResult(result, activeTab, newHistory, updatedCmdHistory));
   };
 
-  // Reset virtual filesystem
-  const handleResetSystem = () => {
+  // Réinitialiser le système de fichiers (backend Rust)
+  const handleResetSystem = async () => {
     try {
-      localStorage.removeItem('omnilinux_vfs_v2');
-      const initialFS = createInitialFS();
-      (vfs as any).fs = initialFS;
-      (vfs as any).save();
+      await fsReset();
       handleUpdateTab({
         history: [
           ...activeTab.history,
@@ -270,13 +267,26 @@ export default function App() {
           },
         ],
       });
-    } catch {}
+    } catch (e: any) {
+      handleUpdateTab({
+        history: [
+          ...activeTab.history,
+          {
+            id: `reset-err-${Date.now()}`,
+            type: 'error',
+            content: `❌ Erreur lors de la réinitialisation : ${errMsg(e)}`,
+            cwd: activeTab.cwd,
+            distroId: activeTab.distroId,
+          },
+        ],
+      });
+    }
   };
 
-  // Export File System as JSON
-  const handleExportFileSystem = () => {
+  // Export File System as JSON (Rust VFS)
+  const handleExportFileSystem = async () => {
     try {
-      const fsData = JSON.stringify((vfs as any).fs || {}, null, 2);
+      const fsData = await fsExport();
       const blob = new Blob([fsData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -284,7 +294,9 @@ export default function App() {
       a.download = `omnilinux-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch {}
+    } catch (e: any) {
+      console.warn('Échec de l\'export du système de fichiers :', errMsg(e));
+    }
   };
 
   // Rename Tab Handler
@@ -334,34 +346,30 @@ export default function App() {
     if (found) setTheme(found);
   };
 
-  // Import VFS JSON Handler
-  const handleImportFileSystem = (jsonContent: string) => {
+  // Import VFS JSON Handler (Rust VFS)
+  const handleImportFileSystem = async (jsonContent: string) => {
     try {
-      const parsed = JSON.parse(jsonContent);
-      if (typeof parsed === 'object' && parsed !== null) {
-        (vfs as any).fs = parsed;
-        (vfs as any).save();
-        handleUpdateTab({
-          history: [
-            ...activeTab.history,
-            {
-              id: `import-${Date.now()}`,
-              type: 'system',
-              content: '✓ Sauvegarde VFS importée et restaurée avec succès !',
-              cwd: activeTab.cwd,
-              distroId: activeTab.distroId,
-            },
-          ],
-        });
-      }
-    } catch {
+      await fsImport(jsonContent);
+      handleUpdateTab({
+        history: [
+          ...activeTab.history,
+          {
+            id: `import-${Date.now()}`,
+            type: 'system',
+            content: '✓ Sauvegarde VFS importée et restaurée avec succès !',
+            cwd: activeTab.cwd,
+            distroId: activeTab.distroId,
+          },
+        ],
+      });
+    } catch (e: any) {
       handleUpdateTab({
         history: [
           ...activeTab.history,
           {
             id: `import-err-${Date.now()}`,
             type: 'error',
-            content: '❌ Erreur : Format de fichier JSON invalide pour la restauration VFS.',
+            content: `❌ Erreur : Format de fichier JSON invalide pour la restauration VFS. (${errMsg(e)})`,
             cwd: activeTab.cwd,
             distroId: activeTab.distroId,
           },
@@ -386,13 +394,14 @@ export default function App() {
     } catch {}
   };
 
-  // Select Distro for Current Tab
-  const handleSelectDistro = (distroId: DistroId) => {
-    vfs.updateOSRelease(
-      LINUX_DISTROS.find((d) => d.id === distroId)?.name || 'Linux',
-      LINUX_DISTROS.find((d) => d.id === distroId)?.version || '1.0',
-      distroId
-    );
+  // Select Distro for Current Tab (Rust VFS: met à jour /etc/os-release)
+  const handleSelectDistro = async (distroId: DistroId) => {
+    const distro = LINUX_DISTROS.find((d) => d.id === distroId);
+    try {
+      await fsUpdateOSRelease(distro?.name || 'Linux', distro?.version || '1.0');
+    } catch (e: any) {
+      console.warn('Échec de la mise à jour de /etc/os-release :', errMsg(e));
+    }
     handleUpdateTab({ distroId });
   };
 

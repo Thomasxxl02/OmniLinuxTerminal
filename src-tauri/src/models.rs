@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Type de nœud dans le système de fichiers virtuel POSIX
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeType {
     File,
@@ -9,7 +9,7 @@ pub enum NodeType {
 }
 
 /// Nœud de fichier POSIX dans le VFS Rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FileNode {
     pub id: String,
@@ -19,6 +19,7 @@ pub struct FileNode {
     pub path: String,
     pub parent_id: Option<String>,
     pub content: Option<String>,
+    #[specta(type = specta_typescript::Number)]
     pub size: u64,
     pub permissions: String,
     pub owner: String,
@@ -27,7 +28,7 @@ pub struct FileNode {
 }
 
 /// Distribution Linux supportée
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DistroInfo {
     pub id: String,
@@ -43,7 +44,7 @@ pub struct DistroInfo {
 }
 
 /// Résultat d'exécution d'une commande shell
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandExecutionResult {
     pub text: Option<String>,
@@ -53,11 +54,12 @@ pub struct CommandExecutionResult {
     pub active_app: Option<String>,
     pub installed_package: Option<String>,
     pub switched_distro: Option<String>,
+	#[specta(type = specta_typescript::Number)]
     pub execution_time_ms: u64,
 }
 
 /// Requête de complétion / génération IA
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiGenerateRequest {
     pub prompt: String,
@@ -70,7 +72,7 @@ pub struct AiGenerateRequest {
 }
 
 /// Réponse structurée de génération IA
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AiGenerateResponse {
     pub command: String,
@@ -79,21 +81,27 @@ pub struct AiGenerateResponse {
 }
 
 /// Statistiques système et télémétrie
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemTelemetry {
     pub cpu_usage_percent: f32,
+	#[specta(type = specta_typescript::Number)]
     pub memory_used_mb: u64,
+	#[specta(type = specta_typescript::Number)]
     pub memory_total_mb: u64,
+	#[specta(type = specta_typescript::Number)]
     pub disk_used_mb: u64,
+	#[specta(type = specta_typescript::Number)]
     pub disk_total_mb: u64,
+	#[specta(type = specta_typescript::Number)]
     pub uptime_seconds: u64,
+	#[specta(type = specta_typescript::Number)]
     pub active_processes_count: usize,
     pub distro_id: String,
 }
 
 /// Processus virtuel pour le moniteur htop / ps
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessItem {
     pub pid: u32,
@@ -104,8 +112,53 @@ pub struct ProcessItem {
     pub status: String,
 }
 
+/// Erreur applicative commune exposée par toutes les commandes Tauri.
+/// Permet un typage des erreurs côté frontend et une génération specta.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AppError {
+    pub code: String,
+    pub message: String,
+    pub details: Option<String>,
+}
+
+impl AppError {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+            details: None,
+        }
+    }
+
+    pub fn with_details(code: &str, message: impl Into<String>, details: impl Into<String>) -> Self {
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+            details: Some(details.into()),
+        }
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new("not_found", message)
+    }
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new("invalid", message)
+    }
+    pub fn not_implemented() -> Self {
+        Self::new("not_implemented", "Commande définie mais non implémentée (phase ultérieure)")
+    }
+}
+
+/// Conversion aisée des erreurs `String` du VFS/moteur vers `AppError`.
+impl From<String> for AppError {
+    fn from(value: String) -> Self {
+        Self::new("io", value)
+    }
+}
+
 /// Information d'architecture Tauri v2
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct TauriBackendInfo {
     pub tauri_version: String,
@@ -113,7 +166,9 @@ pub struct TauriBackendInfo {
     pub os_family: String,
     pub arch: String,
     pub ipc_status: String,
+	#[specta(type = specta_typescript::Number)]
     pub virtual_fs_nodes: usize,
+	#[specta(type = specta_typescript::Number)]
     pub supported_distros: usize,
 }
 
@@ -122,7 +177,7 @@ pub struct TauriBackendInfo {
 // ===========================================================================
 
 /// Résultat unifié d'exécution d'une commande (remplace CommandExecutionResult).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
     pub stdout: String,
@@ -134,7 +189,7 @@ pub struct CommandResult {
 
 /// Effet que Rust demande au frontend d'exécuter. La décision vient de Rust,
 /// React ne fait que le rendu (ouvrir un éditeur, effacer l'écran, lancer une app...).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum TerminalEffect {
     OpenEditor {
@@ -162,7 +217,7 @@ pub enum TerminalEffect {
 }
 
 /// Niveau de risque d'une commande (Phase 6 — module security).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum RiskLevel {
     Safe,
@@ -172,7 +227,7 @@ pub enum RiskLevel {
 }
 
 /// Évaluation de sécurité structurée d'une commande (Phase 6).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SafetyAssessment {
     pub level: RiskLevel,

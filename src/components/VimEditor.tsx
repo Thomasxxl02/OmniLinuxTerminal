@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { vfs } from '../lib/filesystem';
+import { fsWrite, errMsg } from '../lib/fsApi';
 
 interface VimEditorProps {
   filePath: string;
@@ -45,7 +45,7 @@ export const VimEditor: React.FC<VimEditorProps> = ({
     }
   };
 
-  const handleCommandKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleCommandKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
       setMode('normal');
       setCommandInput('');
@@ -56,17 +56,26 @@ export const VimEditor: React.FC<VimEditorProps> = ({
       e.preventDefault();
       const cmd = commandInput.trim();
       if (cmd === ':w') {
-        const dirPath = vfs.normalizePath(filePath + '/..');
-        vfs.createFile(dirPath, fileName, content);
-        setStatusMsg(`"${fileName}" écrites, ${content.length}B`);
+        try {
+          // filePath provient déjà normalisé de l'effet Rust openEditor.
+          await fsWrite(filePath, content, false);
+          setStatusMsg(`"${fileName}" écrites, ${content.length}B`);
+        } catch (err) {
+          setStatusMsg(`E466: ${errMsg(err)}`);
+        }
         setMode('normal');
         setCommandInput('');
       } else if (cmd === ':q') {
         onClose(false);
       } else if (cmd === ':wq' || cmd === ':x' || cmd === ':wq!') {
-        const dirPath = vfs.normalizePath(filePath + '/..');
-        vfs.createFile(dirPath, fileName, content);
-        onClose(true);
+        try {
+          await fsWrite(filePath, content, false);
+          onClose(true);
+        } catch (err) {
+          setStatusMsg(`E466: ${errMsg(err)}`);
+          setMode('normal');
+          setCommandInput('');
+        }
       } else if (cmd === ':q!') {
         onClose(false);
       } else {
