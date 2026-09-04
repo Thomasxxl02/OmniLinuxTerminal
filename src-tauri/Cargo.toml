@@ -1,0 +1,26 @@
+[package]
+name = "omnilinux-terminal"
+version = "1.0.0"
+description = "OmniLinux Terminal - Multi-Distribution Linux Terminal & SysAdmin Studio powered by Tauri v2 and Rust"
+authors = ["OmniLinux Team"]
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "omnilinux_terminal_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-shell = "2.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+thiserror = "1.0"

@@ -1,0 +1,6 @@
+{
+  "name": "OmniLinux Terminal",
+  "description": "Terminal Linux universel multi-distribution avec backend natif Rust & Tauri v2, système de fichiers virtuel POSIX, gestionnaires de paquets et copilote IA multi-modèles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
