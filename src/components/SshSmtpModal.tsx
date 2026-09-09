@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { secretSave } from '../lib/secretsApi';
+import { secretSave, secretDelete } from '../lib/secretsApi';
 import {
   Server,
   Mail,
@@ -677,7 +677,16 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
                   if (p) applySshProfile(p);
                 },
                 async (id) => {
+                  const p = sshProfiles.find((x) => x.id === id);
                   await sshDeleteProfile(id);
+                  // Purge le secret associé du trousseau système (jamais laissé orphelin).
+                  if (p?.name) {
+                    try {
+                      await secretDelete('ssh', p.name);
+                    } catch (e) {
+                      console.warn('[secret_delete ssh]', e);
+                    }
+                  }
                   await reloadSshProfiles();
                 },
                 sshProfiles
@@ -854,7 +863,16 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
                   if (p) applySmtpProfile(p);
                 },
                 async (id) => {
+                  const p = smtpProfiles.find((x) => x.id === id);
                   await smtpDeleteProfile(id);
+                  // Purge le secret associé du trousseau système (jamais laissé orphelin).
+                  if (p?.name) {
+                    try {
+                      await secretDelete('smtp', p.name);
+                    } catch (e) {
+                      console.warn('[secret_delete smtp]', e);
+                    }
+                  }
                   await reloadSmtpProfiles();
                 },
                 smtpProfiles
