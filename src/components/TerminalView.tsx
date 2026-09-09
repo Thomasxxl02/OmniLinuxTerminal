@@ -4,7 +4,15 @@ import { useDistros, resolveDistro } from '../lib/distroStore';
 import { runTerminalCommand, applyTerminalResult } from '../lib/tauriBridge';
 import { terminalSupportedCommands } from '../lib/terminalApi';
 import { playTerminalSound } from '../lib/soundEffects';
-import { Copy, Trash2, Terminal as TerminalIcon, Sparkles, AlertTriangle } from 'lucide-react';
+import {
+  Copy,
+  ClipboardPaste,
+  Check,
+  Trash2,
+  Terminal as TerminalIcon,
+  Sparkles,
+  AlertTriangle,
+} from 'lucide-react';
 import { riskAnalyze, RiskReport } from '../lib/riskApi';
 
 export interface SshSessionState {
@@ -42,6 +50,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const [isExecuting, setIsExecuting] = useState(false);
   const [supportedCmds, setSupportedCmds] = useState<string[]>([]);
   const [riskConfirm, setRiskConfirm] = useState<{ command: string; report: RiskReport } | null>(null);
+  // Copier-coller à la souris (Priorité « terminal amélioré »).
+  const [selectionActive, setSelectionActive] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // Liste des commandes fournie par le moteur Rust (source de vérité unique).
   useEffect(() => {
@@ -55,6 +66,133 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   const distros = useDistros();
   const currentDistro = resolveDistro(distros, tab.distroId);
+
+  // ==== Copier-coller (sélection souris + presse-papiers) ====
+
+  const getSelectionText = () => window.getSelection()?.toString() ?? '';
+
+  const copyText = async (text: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Repli pour les webviews sans permission clipboard-write : textarea temporaire.
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+
+  // Détecte une sélection (souris ou clavier) pour activer le bouton « Copier ».
+  useEffect(() => {
+    const update = () => setSelectionActive(getSelectionText().length > 0);
+    document.addEventListener('mouseup', update);
+    document.addEventListener('keyup', update);
+    document.addEventListener('selectionchange', update);
+    return () => {
+      document.removeEventListener('mouseup', update);
+      document.removeEventListener('keyup', update);
+      document.removeEventListener('selectionchange', update);
+    };
+  }, []);
+
+  const copySelection = () => copyText(getSelectionText());
+
+  const copyAllOutput = () => {
+    const out = tab.history.filter((l) => l.type === 'output').map((l) => l.content).join('\n');
+    copyText(out);
+  };
+
+  // Colle une chaîne dans l'input. Multi-lignes : exécute les lignes (hors la
+  // dernière, laissée en édition), comme un vrai terminal.
+  const insertPastedText = (text: string) => {
+    const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim().length > 0);
+    if (lines.length === 0) return;
+    if (lines.length === 1) {
+      setInputVal((v) => v + lines[0]);
+      return;
+    }
+    const last = lines[lines.length - 1];
+    const toRun = lines.slice(0, -1);
+    setInputVal(last);
+    void (async () => {
+      for (const line of toRun) {
+        await executeCommand(line);
+      }
+    })();
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = e.clipboardData.getData('text');
+    if (!text) return;
+    e.preventDefault();
+    insertPastedText(text);
+  };
+
+  const pasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) insertPastedText(text);
+    } catch {
+      // Permission refusée (webview) : on laisse l'utilisateur coller nativement.
+      inputRef.current?.focus();
+    }
+  };
+
+  // ==== Exécution de commande (réutilisée par saisie, confirmation et collage) ====
+  const executeCommand = async (command: string, opts: { skipRisk: boolean } = { skipRisk: false }) => {
+    const trimmed = command.trim();
+    if (!trimmed) return;
+    const inputLineId = `line-${Date.now()}`;
+    const newHistory: TerminalTab['history'] = [
+      ...tab.history,
+      { id: inputLineId, type: 'input' as const, content: command, cwd: tab.cwd, distroId: tab.distroId },
+    ];
+    const updatedCmdHistory = [...tab.commandHistory, command];
+
+    // Garde-fou sécurité : analyse de risque avant exécution (source Rust).
+    if (!opts.skipRisk) {
+      let report: RiskReport | null = null;
+      try {
+        report = await riskAnalyze(trimmed);
+      } catch {
+        report = null;
+      }
+      if (report?.blocked) {
+        onUpdateTab(
+          applyTerminalResult(
+            {
+              stdout: `⛔ Commande bloquée (analyse de risque).\n${report.reasons.join('\n')}`,
+              stderr: '',
+              exitCode: 1,
+              cwd: tab.cwd,
+              effects: [],
+            },
+            tab,
+            newHistory,
+            updatedCmdHistory
+          )
+        );
+        return;
+      }
+      if (report?.needsConfirmation) {
+        setRiskConfirm({ command, report });
+        return;
+      }
+    }
+
+    setIsExecuting(true);
+    const result = await runTerminalCommand(command, tab.cwd, tab.distroId);
+    setIsExecuting(false);
+    onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
+  };
 
   // Sound click effect generator
   const playKeyPressSound = () => {
@@ -79,70 +217,22 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   // Command submission handler
   const handleSubmit = async (cmdToRun?: string) => {
     const command = cmdToRun !== undefined ? cmdToRun : inputVal;
-    const trimmed = command.trim();
-
     playKeyPressSound();
-
-    // Append input line to history
-    const inputLineId = `line-${Date.now()}`;
-    const newHistory = [
-      ...tab.history,
-      {
-        id: inputLineId,
-        type: 'input' as const,
-        content: command,
-        cwd: tab.cwd,
-        distroId: tab.distroId,
-      },
-    ];
-
     setInputVal('');
     setHistoryIdx(-1);
 
-    if (!trimmed) {
-      onUpdateTab({ history: newHistory });
+    if (!command.trim()) {
+      const inputLineId = `line-${Date.now()}`;
+      onUpdateTab({
+        history: [
+          ...tab.history,
+          { id: inputLineId, type: 'input' as const, content: command, cwd: tab.cwd, distroId: tab.distroId },
+        ],
+      });
       return;
     }
 
-    // Update command history array
-    const updatedCmdHistory = [...tab.commandHistory, command];
-
-    // Garde-fou sécurité : analyse de risque avant exécution (source Rust).
-    let report: RiskReport | null = null;
-    try {
-      report = await riskAnalyze(trimmed);
-    } catch {
-      report = null;
-    }
-
-    if (report && report.blocked) {
-      onUpdateTab(
-        applyTerminalResult(
-          {
-            stdout: `⛔ Commande bloquée (analyse de risque).\n${report.reasons.join('\n')}`,
-            stderr: '',
-            exitCode: 1,
-            cwd: tab.cwd,
-            effects: [],
-          },
-          tab,
-          newHistory,
-          updatedCmdHistory
-        )
-      );
-      return;
-    }
-
-    if (report && report.needsConfirmation) {
-      setRiskConfirm({ command, report });
-      return;
-    }
-
-    setIsExecuting(true);
-    const result = await runTerminalCommand(command, tab.cwd, tab.distroId);
-    setIsExecuting(false);
-
-    onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
+    await executeCommand(command);
   };
 
   const handleRiskDecision = (run: boolean) => {
@@ -150,21 +240,12 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     const command = riskConfirm.command;
     setRiskConfirm(null);
     if (!run) return;
-    const newHistory = [
-      ...tab.history,
-      { id: `line-${Date.now()}`, type: 'input' as const, content: command, cwd: tab.cwd, distroId: tab.distroId },
-    ];
-    const updatedCmdHistory = [...tab.commandHistory, command];
-    setIsExecuting(true);
-    runTerminalCommand(command, tab.cwd, tab.distroId)
-      .then((result) => {
-        setIsExecuting(false);
-        onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
-      })
-      .catch(() => setIsExecuting(false));
+    setInputVal('');
+    setHistoryIdx(-1);
+    void executeCommand(command, { skipRisk: true });
   };
 
-  // Keyboard navigation & tab autocompletion
+  // Keyboard navigation, autocomplétion & copier-coller
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     playKeyPressSound();
 
@@ -173,7 +254,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       return;
     }
 
-    // Tab autocompletion (source : moteur Rust, plus de liste dupliquée)
+    // Copier (Ctrl/Cmd + C) : copie la sélection si présente, sinon comportement natif.
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      const sel = getSelectionText();
+      if (sel) {
+        e.preventDefault();
+        void copyText(sel);
+      }
+      return;
+    }
+
+    // Tab autocomplétion (source : moteur Rust, plus de liste dupliquée)
     if (e.key === 'Tab') {
       e.preventDefault();
       const match = supportedCmds.find((c) => c.startsWith(inputVal));
@@ -254,6 +345,23 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     [onSshKey]
   );
 
+  // Colle le presse-papiers dans un terminal SSH interactif (octets bruts UTF-8).
+  const handleSshPaste = useCallback(
+    (e: React.ClipboardEvent<HTMLInputElement>) => {
+      const text = e.clipboardData.getData('text');
+      if (text && onSshKey) {
+        e.preventDefault();
+        onSshKey(Array.from(new TextEncoder().encode(text)));
+      }
+    },
+    [onSshKey]
+  );
+
+  const copySshOutput = () => copyText(sshSession?.output ?? '');
+
+  const actionMenuBtn =
+    'bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white px-2 py-1 rounded text-[10px] border border-zinc-800 flex items-center gap-1';
+
   // Mode SSH interactif : passthrough clavier → hôte, sortie affichée telle quelle.
   if (sshSession?.connected) {
     return (
@@ -267,12 +375,18 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             <TerminalIcon className="w-3.5 h-3.5" />
             Session SSH interactive — {sshSession.user}@{sshSession.host}
           </span>
-          <button
-            onClick={onSshDisconnect}
-            className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-medium"
-          >
-            Déconnecter
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={copySshOutput} title="Copier la sortie SSH" className={actionMenuBtn}>
+              {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+              {copied ? 'Copié' : 'Copier'}
+            </button>
+            <button
+              onClick={onSshDisconnect}
+              className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-medium"
+            >
+              Déconnecter
+            </button>
+          </div>
         </div>
         <pre
           ref={sshOutRef}
@@ -285,6 +399,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           ref={sshInRef}
           autoFocus
           onKeyDown={handleSshKeyDown}
+          onPaste={handleSshPaste}
           className="absolute opacity-0 w-0 h-0"
           aria-label="Clavier de session SSH"
         />
@@ -328,6 +443,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             <p className="text-zinc-400 text-[11px]">
               Tapez <code className="text-amber-300">help</code> pour voir la liste des commandes, <code className="text-sky-300">neofetch</code> pour les specs, ou <code className="text-emerald-300">ai "votre question"</code> pour l'assistant IA Gemini.
             </p>
+            <p className="text-zinc-500 text-[11px]">
+              Astuce : sélectionnez du texte à la souris puis <code className="text-zinc-300">Ctrl+C</code> pour copier, <code className="text-zinc-300">Ctrl+V</code> pour coller (multi-lignes = commandes exécutées).
+            </p>
           </div>
         )}
 
@@ -364,6 +482,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             value={inputVal}
             onChange={(e) => setInputVal(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             autoFocus
             disabled={isExecuting}
             className="flex-1 bg-transparent font-mono text-white focus:outline-none border-none p-0 tracking-wide"
@@ -374,10 +493,22 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
       {/* Floating Action Menu in bottom corner */}
       <div className="sticky bottom-0 right-0 self-end pt-4 select-none opacity-80 hover:opacity-100 transition flex gap-2">
+        {selectionActive && (
+          <button onClick={copySelection} title="Copier la sélection (Ctrl+C)" className={actionMenuBtn}>
+            {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+            {copied ? 'Copié' : 'Copier la sélection'}
+          </button>
+        )}
+        <button onClick={copyAllOutput} title="Copier toute la sortie" className={actionMenuBtn}>
+          <Copy className="w-3 h-3" /> Copier la sortie
+        </button>
+        <button onClick={pasteFromClipboard} title="Coller (Ctrl+V)" className={actionMenuBtn}>
+          <ClipboardPaste className="w-3 h-3" /> Coller
+        </button>
         <button
           onClick={() => onUpdateTab({ history: [] })}
           title="Effacer le terminal (Ctrl+L)"
-          className="bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white px-2 py-1 rounded text-[10px] border border-zinc-800 flex items-center gap-1"
+          className={actionMenuBtn}
         >
           <Trash2 className="w-3 h-3" /> Effacer
         </button>
