@@ -45,8 +45,8 @@ les événements émis par Rust.
 2. **Distro dupliquée** : `data/distros.ts` vs `distro/mod.rs`.
 3. **IA multi-fournisseurs** : unifiée en Rust (`ai/service.rs` + `ai/commands.rs`), `server.ts` supprimé ; `ai/mod.rs` conserve `generate_fallback` comme suggestion hors-ligne console.
 4. **Types dupliqués** : `types.ts` manuel vs `models.rs` (serde).
-5. **Clés API + config en localStorage** → store Rust.
-6. **Fallback mock** : `tauriBridge.handleBridgeCall` (données en dur).
+5. ✅ **Clés API jamais persistées** : la config IA est sauvegardée en `localStorage` sans `apiKeys`/`customApiKey` (secrets en mémoire, règle « secrets never persisted »).
+6. ✅ **Plus aucune donnée simulée** : `tauriBridge.handleBridgeCall` retourne `null` (dégradation honnête) ; les fausses données système/IA en dur ont été retirées.
 
 ---
 

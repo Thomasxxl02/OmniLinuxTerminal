@@ -98,52 +98,13 @@ export function getTauriTelemetry(): TauriBackendTelemetry {
 }
 
 /**
- * Moteur miroir TypeScript exécutant la logique métier Rust en mode Web Preview
+ * Fallback de dégradation honnête en mode navigateur / Web Preview.
+ * Règle « aucune donnée simulée » : on ne retourne JAMAIS de données factices.
+ * Les vrais résultats proviennent uniquement des commandes Rust via l'IPC Tauri.
+ * Ici : retourne `null` — l'appelant doit gérer l'absence de backend natif.
  */
-function handleBridgeCall<T>(cmd: string, args: Record<string, any>): T {
-  switch (cmd) {
-    case 'tauri_get_backend_info':
-      return {
-        tauriVersion: '2.0.0',
-        rustcVersion: '1.85.0',
-        osFamily: 'linux',
-        arch: 'x86_64',
-        ipcStatus: isTauriEnvironment() ? 'Native Tauri v2 IPC' : 'Rust-Bridge Web Assembly',
-        virtualFsNodes: 18,
-        supportedDistros: 10,
-      } as unknown as T;
-
-    case 'system_get_telemetry':
-      return {
-        cpuUsagePercent: 12.4,
-        memoryUsedMb: 2150,
-        memoryTotalMb: 16384,
-        diskUsedMb: 8420,
-        diskTotalMb: 51200,
-        uptimeSeconds: 43200,
-        activeProcessesCount: 6,
-        distroId: args.distroId || 'ubuntu',
-      } as unknown as T;
-
-    case 'system_list_processes':
-      return [
-        { pid: 1, user: 'root', cpu: 0.1, mem: 0.3, command: '/sbin/init', status: 'S' },
-        { pid: 42, user: 'systemd', cpu: 0.2, mem: 0.5, command: '/lib/systemd/systemd-journald', status: 'S' },
-        { pid: 104, user: 'user', cpu: 1.1, mem: 2.3, command: 'omnilinux-tauri-backend (rust)', status: 'R' },
-        { pid: 108, user: 'user', cpu: 0.4, mem: 1.1, command: '/bin/bash --login', status: 'S' },
-        { pid: 144, user: 'user', cpu: 0.1, mem: 0.4, command: 'ai-copilot-daemon (gemini-flash)', status: 'S' },
-      ] as unknown as T;
-
-    case 'ai_generate_command':
-      return {
-        command: `echo "[Tauri Rust IPC] Demande traitée : ${args.request?.prompt || ''}"`,
-        explanation: 'Exécuté par le routeur de logique métier Rust Tauri v2.',
-        warnings: null,
-      } as unknown as T;
-
-    default:
-      return null as unknown as T;
-  }
+function handleBridgeCall<T>(cmd: string, _args: Record<string, any>): T {
+  return null as unknown as T;
 }
 
 // ===========================================================================

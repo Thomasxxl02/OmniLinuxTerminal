@@ -126,19 +126,26 @@ export default function App() {
     };
   });
 
+  // Règle « secrets en mémoire » : on ne persiste JAMAIS les clés API
+  // (apiKeys, customApiKey) dans localStorage — uniquement la config non sensible.
+  const persistAiConfig = (config: AiConfig) => {
+    try {
+      const nonSecret = { ...config };
+      delete nonSecret.apiKeys;
+      delete nonSecret.customApiKey;
+      localStorage.setItem('omnilinux_ai_config', JSON.stringify(nonSecret));
+    } catch {}
+  };
+
   const handleSaveAiConfig = (newConfig: AiConfig) => {
     setAiConfig(newConfig);
-    try {
-      localStorage.setItem('omnilinux_ai_config', JSON.stringify(newConfig));
-    } catch {}
+    persistAiConfig(newConfig);
   };
 
   const handleSelectAiModel = (modelId: string) => {
     const updated = { ...aiConfig, model: modelId };
     setAiConfig(updated);
-    try {
-      localStorage.setItem('omnilinux_ai_config', JSON.stringify(updated));
-    } catch {}
+    persistAiConfig(updated);
   };
 
   const distros = useDistros();
