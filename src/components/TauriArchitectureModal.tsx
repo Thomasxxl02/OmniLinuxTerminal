@@ -88,7 +88,7 @@ thiserror = "1.0"`,
   "app": {
     "windows": [
       {
-        "title": "OmniLinux Terminal (Tauri v2 + Rust)",
+        "title": "OmniLinux Terminal",
         "width": 1280,
         "height": 840,
         "minWidth": 800,
