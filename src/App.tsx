@@ -6,6 +6,7 @@ import { MenuBar } from './components/MenuBar';
 import { TerminalHeader } from './components/TerminalHeader';
 import { TerminalView, SshSessionState } from './components/TerminalView';
 import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionInfo } from './lib/sshApi';
+import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from './lib/aiApi';
 import { NanoEditor } from './components/NanoEditor';
 import { VimEditor } from './components/VimEditor';
 import { HtopMonitor } from './components/HtopMonitor';
@@ -463,49 +464,48 @@ export default function App() {
       ? aiConfig.customApiKey.trim()
       : undefined;
 
-    fetch('/api/ai/generate-command', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: command,
-        distro: activeTab.distroId,
-        currentDir: activeTab.cwd,
-        model: aiConfig.model,
-        apiKey: customKey,
-      }),
+    aiGenerate({
+      prompt: command,
+      distro: activeTab.distroId,
+      currentDir: activeTab.cwd,
+      model: aiConfig.model,
+      apiKey: customKey,
     }).catch(() => {});
   };
 
   // AI Request Handler
   const handleAiRequest = async (type: 'generate' | 'explain' | 'debug', query: string) => {
     try {
-      const endpoint =
-        type === 'generate'
-          ? '/api/ai/generate-command'
-          : type === 'explain'
-          ? '/api/ai/explain-command'
-          : '/api/ai/debug-error';
-
       const customKey = aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
         ? aiConfig.customApiKey.trim()
         : undefined;
 
-      const bodyData =
-        type === 'generate'
-          ? { prompt: query, distro: activeTab.distroId, currentDir: activeTab.cwd, model: aiConfig.model, apiKey: customKey }
-          : type === 'explain'
-          ? { command: query, distro: activeTab.distroId, model: aiConfig.model, apiKey: customKey }
-          : { command: query, errorOutput: '', distro: activeTab.distroId, model: aiConfig.model, apiKey: customKey };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyData),
+      if (type === 'generate') {
+        return await aiGenerate({
+          prompt: query,
+          distro: activeTab.distroId,
+          currentDir: activeTab.cwd,
+          model: aiConfig.model,
+          apiKey: customKey,
+        });
+      }
+      if (type === 'explain') {
+        return await aiExplain({
+          command: query,
+          distro: activeTab.distroId,
+          model: aiConfig.model,
+          apiKey: customKey,
+        });
+      }
+      return await aiDebug({
+        command: query,
+        errorOutput: '',
+        distro: activeTab.distroId,
+        model: aiConfig.model,
+        apiKey: customKey,
       });
-
-      return await res.json();
     } catch (e: any) {
-      return { error: e.message || 'Erreur réseau avec Gemini.' };
+      return { error: aiErrorMessage(e) || 'Erreur avec l\'assistant IA.' };
     }
   };
 

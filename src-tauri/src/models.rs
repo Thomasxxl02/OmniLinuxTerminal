@@ -69,6 +69,7 @@ pub struct AiGenerateRequest {
     pub api_key: Option<String>,
     pub temperature: Option<f32>,
     pub persona: Option<String>,
+    pub custom_endpoint: Option<String>,
 }
 
 /// Réponse structurée de génération IA
@@ -77,7 +78,85 @@ pub struct AiGenerateRequest {
 pub struct AiGenerateResponse {
     pub command: String,
     pub explanation: String,
+    pub tips: Option<String>,
     pub warnings: Option<String>,
+}
+
+/// Test de configuration IA (clé + modèle)
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTestRequest {
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub sample_prompt: Option<String>,
+    pub custom_endpoint: Option<String>,
+}
+
+/// Résultat du test de configuration IA
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTestResponse {
+    pub status: String,
+    pub model: String,
+    pub engine_model: String,
+    pub provider: String,
+    pub provider_id: String,
+    pub latency_ms: u64,
+    pub message: String,
+    pub sample_response: String,
+}
+
+/// Requête d'explication de commande
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiExplainRequest {
+    pub command: String,
+    pub distro: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub temperature: Option<f32>,
+    pub persona: Option<String>,
+    pub custom_endpoint: Option<String>,
+}
+
+/// Élément de breakdown d'une commande expliquée
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiBreakdownItem {
+    pub part: String,
+    pub description: String,
+}
+
+/// Réponse d'explication de commande
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiExplainResponse {
+    pub summary: String,
+    pub breakdown: Vec<AiBreakdownItem>,
+    pub safety: String,
+    pub example: String,
+}
+
+/// Requête de débogage d'erreur
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDebugRequest {
+    pub command: String,
+    pub error_output: Option<String>,
+    pub distro: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub temperature: Option<f32>,
+    pub custom_endpoint: Option<String>,
+}
+
+/// Réponse de débogage d'erreur
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDebugResponse {
+    pub cause: String,
+    pub solution: String,
+    pub corrected_command: String,
 }
 
 /// Statistiques système et télémétrie

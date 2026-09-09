@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Sparkles, Terminal, Copy, Check, Play, HelpCircle, AlertTriangle, ArrowRight, ShieldCheck, Settings, Key } from 'lucide-react';
 import { DistroId, AiConfig, backendProviderIdForModel } from '../types';
+import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from '../lib/aiApi';
 
 interface AiCopilotDrawerProps {
   distroId: DistroId;
@@ -60,24 +61,19 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
     setGenResult(null);
 
     try {
-      const res = await fetch('/api/ai/generate-command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: genQuery,
-          distro: distroId,
-          currentDir: cwd,
-          model: aiConfig.model,
-          apiKey: currentApiKey,
-          customEndpoint: currentCustomEndpoint,
-          temperature: aiConfig.temperature,
-          persona: aiConfig.persona,
-        }),
+      const data = await aiGenerate({
+        prompt: genQuery,
+        distro: distroId,
+        currentDir: cwd,
+        model: aiConfig.model,
+        apiKey: currentApiKey,
+        customEndpoint: currentCustomEndpoint,
+        temperature: aiConfig.temperature,
+        persona: aiConfig.persona,
       });
-      const data = await res.json();
-      setGenResult(data);
+      setGenResult(data as any);
     } catch (err) {
-      setGenResult({ error: "Erreur de communication avec l'assistant IA." });
+      setGenResult({ error: aiErrorMessage(err) });
     } finally {
       setGenLoading(false);
     }
@@ -90,23 +86,18 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
     setExplainResult(null);
 
     try {
-      const res = await fetch('/api/ai/explain-command', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: explainCmd,
-          distro: distroId,
-          model: aiConfig.model,
-          apiKey: currentApiKey,
-          customEndpoint: currentCustomEndpoint,
-          temperature: aiConfig.temperature,
-          persona: aiConfig.persona,
-        }),
+      const data = await aiExplain({
+        command: explainCmd,
+        distro: distroId,
+        model: aiConfig.model,
+        apiKey: currentApiKey,
+        customEndpoint: currentCustomEndpoint,
+        temperature: aiConfig.temperature,
+        persona: aiConfig.persona,
       });
-      const data = await res.json();
-      setExplainResult(data);
+      setExplainResult(data as any);
     } catch (err) {
-      setExplainResult({ error: "Erreur lors de l'explication." });
+      setExplainResult({ error: aiErrorMessage(err) });
     } finally {
       setExplainLoading(false);
     }
@@ -119,24 +110,18 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
     setDebugResult(null);
 
     try {
-      const res = await fetch('/api/ai/debug-error', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: debugCmd,
-          errorOutput: debugErrorOutput,
-          distro: distroId,
-          model: aiConfig.model,
-          apiKey: currentApiKey,
-          customEndpoint: currentCustomEndpoint,
-          temperature: aiConfig.temperature,
-          persona: aiConfig.persona,
-        }),
+      const data = await aiDebug({
+        command: debugCmd,
+        errorOutput: debugErrorOutput,
+        distro: distroId,
+        model: aiConfig.model,
+        apiKey: currentApiKey,
+        customEndpoint: currentCustomEndpoint,
+        temperature: aiConfig.temperature,
       });
-      const data = await res.json();
-      setDebugResult(data);
+      setDebugResult(data as any);
     } catch (err) {
-      setDebugResult({ error: 'Erreur lors du débogage.' });
+      setDebugResult({ error: aiErrorMessage(err) });
     } finally {
       setDebugLoading(false);
     }

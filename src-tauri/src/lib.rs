@@ -7,11 +7,10 @@ pub mod ssh;
 pub mod system;
 pub mod terminal;
 
-use ai::AiEngine;
 use distro::{get_distro_by_id, get_supported_distros};
 use fs::VirtualFileSystem;
 use models::{
-    AiGenerateRequest, AiGenerateResponse, AppError, CommandResult, DistroInfo, FileNode,
+    AppError, CommandResult, DistroInfo, FileNode,
     ProcessItem, SystemTelemetry, TauriBackendInfo,
 };
 use std::sync::Mutex;
@@ -247,30 +246,6 @@ fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo
 
 // ------------------ IA ------------------
 
-#[tauri::command]
-#[specta::specta]
-fn ai_generate(request: AiGenerateRequest) -> AiGenerateResponse {
-    AiEngine::generate_fallback(&request)
-}
-
-#[tauri::command]
-#[specta::specta]
-fn ai_explain(_query: String) -> Result<String, AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn ai_debug(_query: String) -> Result<String, AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn ai_test() -> Result<(), AppError> {
-    Err(AppError::not_implemented())
-}
-
 // ------------------ RÉGLAGES ------------------
 
 #[tauri::command]
@@ -337,12 +312,6 @@ fn distro_get_info(distro_id: String) -> Option<DistroInfo> {
     get_distro_by_id(&distro_id)
 }
 
-#[tauri::command]
-#[specta::specta]
-fn ai_generate_command(request: AiGenerateRequest) -> AiGenerateResponse {
-    AiEngine::generate_fallback(&request)
-}
-
 // ==========================================
 // TAURI APPLICATION RUNNER
 // ==========================================
@@ -379,14 +348,13 @@ pub fn run() {
         session_save,
         session_export,
         session_import,
-        ai_generate,
-        ai_explain,
-        ai_debug,
-        ai_test,
+        ai::commands::ai_generate,
+        ai::commands::ai_explain,
+        ai::commands::ai_debug,
+        ai::commands::ai_test,
         execute_shell_command,
         distro_list_all,
         distro_get_info,
-        ai_generate_command,
         tauri_get_backend_info,
         ssh::commands::ssh_validate_config,
         ssh::commands::ssh_test_connection,
@@ -455,7 +423,7 @@ mod tests {
             fs_write,
             distro_list,
             system_get_telemetry,
-            ai_generate,
+            ai::commands::ai_generate,
             tauri_get_backend_info,
         ]);
         builder

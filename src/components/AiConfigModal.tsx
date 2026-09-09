@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { aiTest, aiErrorMessage } from '../lib/aiApi';
 import {
   Cpu,
   Sparkles,
@@ -394,38 +395,24 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
     setTestResult(null);
 
     try {
-      const res = await fetch('/api/ai/test-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: currentEffectiveModel,
-          apiKey: (apiKeys[activeProviderId] || '').trim() || (isCustomKeyEnabled && customApiKey.trim() ? customApiKey.trim() : undefined),
-          customEndpoint: customEndpoint.trim() || undefined,
-          samplePrompt: testSampleEnabled ? sampleQuery : undefined,
-        }),
+      const data = await aiTest({
+        model: currentEffectiveModel,
+        apiKey: (apiKeys[activeProviderId] || '').trim() || (isCustomKeyEnabled && customApiKey.trim() ? customApiKey.trim() : undefined),
+        customEndpoint: customEndpoint.trim() || undefined,
+        samplePrompt: testSampleEnabled ? sampleQuery : undefined,
       });
-
-      const data = await res.json();
-      if (res.ok && data.status === 'ok') {
-        setTestResult({
-          success: true,
-          message: data.message || `Connexion réussie avec "${data.model}" !`,
-          model: data.model,
-          provider: data.provider,
-          latencyMs: data.latencyMs,
-          sampleResponse: data.sampleResponse,
-        });
-      } else {
-        setTestResult({
-          success: false,
-          message: data.error || 'Impossible de se connecter avec cette configuration.',
-          latencyMs: data.latencyMs,
-        });
-      }
+      setTestResult({
+        success: true,
+        message: data.message || `Connexion réussie avec "${data.model}" !`,
+        model: data.model,
+        provider: data.provider,
+        latencyMs: data.latencyMs,
+        sampleResponse: data.sampleResponse,
+      });
     } catch (err: any) {
       setTestResult({
         success: false,
-        message: err.message || 'Erreur réseau lors du test.',
+        message: aiErrorMessage(err) || 'Impossible de se connecter avec cette configuration.',
       });
     } finally {
       setIsTesting(false);

@@ -1,5 +1,8 @@
 use crate::models::{AiGenerateRequest, AiGenerateResponse};
 
+pub mod commands;
+pub mod service;
+
 /// Moteur de Copilote IA et de validation de sécurité en Rust
 pub struct AiEngine;
 
@@ -22,6 +25,59 @@ impl AiEngine {
         None
     }
 
+    /// Prompt système pour la génération de commande (persona + contexte).
+    pub fn build_generate_prompt(persona: &str, distro: &str, current_dir: &str) -> String {
+        let persona_note = match persona {
+            "educational" => {
+                "Adopte une approche pédagogique, explique le rôle de chaque flag et argument pour faciliter l'apprentissage."
+            }
+            "security" => {
+                "Accorde une attention critique à la sécurité, analyse les privilèges nécessaires et mentionne les risques potentiels."
+            }
+            _ => "Réponds avec concision et précision chirurgicale de niveau SysAdmin/DevOps senior.",
+        };
+        format!(
+            "Tu es un expert Linux. Distribution: \"{}\", répertoire courant: \"{}\".\n{}\n\
+             Convertis la demande en français ou anglais vers la commande bash exacte appropriée pour sa distribution.\n\
+             Fournis un résultat JSON structuré avec:\n\
+             - \"command\": La commande Bash exacte prête à être exécutée.\n\
+             - \"explanation\": Une brève explication en français (2-3 phrases) de ce que fait la commande.\n\
+             - \"tips\": Un ou deux conseils utiles ou drapeaux importants.\n\
+             Réponds UNIQUEMENT sous forme de JSON valide.",
+            distro, current_dir, persona_note
+        )
+    }
+
+    /// Prompt système pour expliquer une commande.
+    pub fn build_explain_prompt(persona: &str, distro: &str, command: &str) -> String {
+        let persona_note = match persona {
+            "educational" => "Détaille pédagogiquement chaque partie pour un utilisateur en cours d'apprentissage.",
+            "security" => "Évalue avec une vigilance accrue la criticité root, les impacts sur le système de fichiers et la sécurité.",
+            _ => "Fournis une analyse technique claire et concise.",
+        };
+        format!(
+            "Tu es un expert en ligne de commande Linux. {}\n\
+             Analyse la commande suivante pour la distribution \"{}\": `{}`.\n\
+             Fournis une explication détaillée en français avec:\n\
+             - \"summary\": Résumé rapide en 1-2 phrases.\n\
+             - \"breakdown\": Un tableau d'éléments décrivant chaque partie, option/drapeau et argument.\n\
+             - \"safety\": Risque potentiel (Faible, Moyen, Élevé) si exécuté avec privilèges root.\n\
+             - \"example\": Un exemple concret d'utilisation.\n\
+             Réponds au format JSON avec les clés \"summary\", \"breakdown\" (liste de {{part, description}}), \"safety\", \"example\".",
+            persona_note, distro, command
+        )
+    }
+
+    /// Prompt système pour déboguer une erreur.
+    pub fn build_debug_prompt() -> String {
+        "Tu es un assistant de débogage pour terminal Linux.\n\
+         Analyse l'erreur ci-dessus et explique en français:\n\
+         1. Pourquoi cette erreur s'est produite.\n\
+         2. La solution exacte ou la commande corrigée.\n\
+         Fournis un objet JSON avec \"cause\", \"solution\", \"correctedCommand\"."
+            .to_string()
+    }
+
     /// Génère le prompt système contextualisé selon le profil (Persona)
     pub fn build_system_prompt(persona: &str, distro: &str) -> String {
         let base = format!(
@@ -31,7 +87,6 @@ impl AiEngine {
              Explique succinctement chaque option et drapeau utilisé.",
             distro
         );
-
         match persona {
             "educational" => format!(
                 "{} Adopte un ton très pédagogique, décompose chaque argument pour un débutant Linux.",
@@ -48,7 +103,7 @@ impl AiEngine {
         }
     }
 
-    /// Générateur de règles de complétion
+    /// Générateur de règles de complétion (hors-ligne, utilisé en fallback console)
     pub fn generate_fallback(req: &AiGenerateRequest) -> AiGenerateResponse {
         let p = req.prompt.to_lowercase();
         let distro = req.distro.as_deref().unwrap_or("ubuntu");
@@ -97,7 +152,20 @@ impl AiEngine {
         AiGenerateResponse {
             command: cmd,
             explanation: exp,
+            tips: None,
             warnings,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safety_detects_dangerous_commands() {
+        assert!(AiEngine::check_safety("rm -rf /").is_some());
+        assert!(AiEngine::check_safety("sudo mkfs /dev/sda1").is_some());
+        assert!(AiEngine::check_safety("ls -la").is_none());
     }
 }

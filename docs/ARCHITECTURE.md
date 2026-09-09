@@ -33,18 +33,17 @@ les événements émis par Rust.
 - Données : `data/distros.ts` (276), `data/themes.ts` (110).
 - Types : `types.ts` (155).
 
-### Rust — `src-tauri/src/` (1 610 lignes) — déjà présent
-`terminal/mod.rs` (681, ShellExecutor) · `fs/mod.rs` (307, VirtualFileSystem) · `distro/mod.rs` (169) · `lib.rs` (155, 12 commandes) · `ai/mod.rs` (103, `generate_fallback`=mock) · `models.rs` (118, DTOs serde) · `system/mod.rs` (71).
+### Rust — `src-tauri/src/` — source de vérité (« Rust décide, React affiche »)
+`terminal/mod.rs` (ShellExecutor) · `fs/mod.rs` (VirtualFileSystem POSIX) · `distro/mod.rs` (catalogue des 10 distros) · `ai/service.rs` + `ai/commands.rs` (providers IA réels multi-fournisseurs : Gemini, Anthropic, OpenAI-compatible, DashScope, OpenRouter, Ollama, custom + 4 commandes async `ai_test`/`ai_generate`/`ai_explain`/`ai_debug`) · `ai/mod.rs` (AiEngine, garde-fou sécurité + prompts) · `ssh/` + `smtp/` (connexions réseau réelles) · `lib.rs` (enregistrement des commandes) · `models.rs` (DTOs serde/specta) · `system/mod.rs`.
 
-### Node — `server.ts` (Express, ~430 lignes) — couche tierce
-API IA réelle multi-fournisseurs + Vite middleware dev. À migrer en Rust (Phase 5).
+✅ **`server.ts` (Express) supprimé** — l'IA vit désormais dans `ai/service.rs` / `ai/commands.rs`. Plus de serveur local ni de dépendances Express/`@google/genai`/`dotenv` ; les 4 appels IA passent par IPC Tauri (clé API en mémoire, jamais persistée).
 
 ---
 
 ## 2. Incohérences détectées (signal de la Phase 1)
 1. **VFS dupliqué** : `lib/filesystem.ts` (VirtualFS + localStorage) vs `src-tauri/src/fs`.
 2. **Distro dupliquée** : `data/distros.ts` vs `distro/mod.rs`.
-3. **IA en 3 exemplaires** : `server.ts` (réelle) / `ai/mod.rs` (mock) / `commandExecutor.ts` (scripté).
+3. **IA multi-fournisseurs** : unifiée en Rust (`ai/service.rs` + `ai/commands.rs`), `server.ts` supprimé ; `ai/mod.rs` conserve `generate_fallback` comme suggestion hors-ligne console.
 4. **Types dupliqués** : `types.ts` manuel vs `models.rs` (serde).
 5. **Clés API + config en localStorage** → store Rust.
 6. **Fallback mock** : `tauriBridge.handleBridgeCall` (données en dur).
@@ -59,7 +58,7 @@ Commandes Tauri typées, source = Rust, types TS **générés** (specta/tauri-sp
 terminal_execute          fs_read        distro_switch      system_get_telemetry
 terminal_complete         fs_write       distro_get_current session_export
 terminal_get_history      fs_list        package_install    session_import
-await fs_remove           ai_generate    ai_test_configuration
+await fs_remove           ai_generate    ai_test
 fs_export                 ai_explain     settings_get
 fs_import                 ai_debug       settings_update
 ```
@@ -130,7 +129,7 @@ Retirer `unsafe-eval` de la CSP ; limiter `connect-src` ; supprimer Express + de
 3. Migrer `filesystem.ts`.
 4. Adapter Nano et Vim.
 5. Migrer données distros/paquets.
-6. Migrer le serveur IA vers Rust.
+6. ✅ Migrer le serveur IA vers Rust (fait — `ai/service.rs` + `ai/commands.rs`).
 7. Migrer paramètres et sessions.
 8. Générer les types TS.
 9. Supprimer anciens moteurs et simulations.
@@ -138,7 +137,7 @@ Retirer `unsafe-eval` de la CSP ; limiter `connect-src` ; supprimer Express + de
 11. Tests + sécurité.
 
 ## 6. Garde-fous sécurité (appliqués récemment)
-`server.ts` bindé `127.0.0.1` (plus de 0.0.0.0), `express.json({ limit: '2mb' })`, handler d'erreurs sans fuite de stack.
+Plus de serveur HTTP exposé : les opérations réseau/IA passent par IPC Tauri (Rust). Aucune surface d'écoute, erreurs et timeouts centralisés, secrets en mémoire (clé API transmise par requête, jamais persistée).
 
 ---
 

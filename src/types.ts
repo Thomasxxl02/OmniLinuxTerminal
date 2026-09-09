@@ -133,8 +133,7 @@ export interface AiConfig {
   safetyFilter?: boolean;
 }
 
-// Mirrors the backend provider registry in server.ts: maps an app model id
-// to the real provider that actually serves it.
+// Maps an app model id to the provider that actually serves it (mirror of the Rust AI provider registry in src-tauri/src/ai/service.rs).
 export type BackendProviderId =
   | 'google' | 'deepseek' | 'mistral' | 'anthropic' | 'openai'
   | 'qwen' | 'llama' | 'ollama' | 'custom';
