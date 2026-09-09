@@ -7,6 +7,7 @@ import { TerminalHeader } from './components/TerminalHeader';
 import { TerminalView, SshSessionState } from './components/TerminalView';
 import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionInfo } from './lib/sshApi';
 import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from './lib/aiApi';
+import { getSettings, updateSetting } from './lib/settingsApi';
 import { NanoEditor } from './components/NanoEditor';
 import { VimEditor } from './components/VimEditor';
 import { HtopMonitor } from './components/HtopMonitor';
@@ -37,12 +38,28 @@ export default function App() {
   });
   const [fontSize, setFontSize] = useState<number>(13);
 
-  // Sync soundStyle to localStorage
+  // --- Réglages persistés via le store Rust (source de vérité) ---
   const handleSelectSoundStyle = (style: TerminalSoundStyle) => {
     setSoundStyle(style);
-    try {
-      localStorage.setItem('omnilinux_sound_style', style);
-    } catch {}
+    updateSetting('soundStyle', style).catch(() => {});
+  };
+  const handleToggleCrt = () => {
+    const v = !crtEffect;
+    setCrtEffect(v);
+    updateSetting('crtEffect', v).catch(() => {});
+  };
+  const handleToggleSound = () => {
+    const v = !soundEnabled;
+    setSoundEnabled(v);
+    updateSetting('soundEnabled', v).catch(() => {});
+  };
+  const handleChangeFontSize = (n: number) => {
+    setFontSize(n);
+    updateSetting('fontSize', n).catch(() => {});
+  };
+  const handleSelectThemeFull = (t: TerminalTheme) => {
+    setTheme(t);
+    updateSetting('themeId', t.id).catch(() => {});
   };
 
   // Tabs State
@@ -126,15 +143,13 @@ export default function App() {
     };
   });
 
-  // Règle « secrets en mémoire » : on ne persiste JAMAIS les clés API
-  // (apiKeys, customApiKey) dans localStorage — uniquement la config non sensible.
+  // Règle « secrets en mémoire » : on ne persiste jamais les clés API
+  // (apiKeys, customApiKey) — uniquement la config non sensible.
   const persistAiConfig = (config: AiConfig) => {
-    try {
-      const nonSecret = { ...config };
-      delete nonSecret.apiKeys;
-      delete nonSecret.customApiKey;
-      localStorage.setItem('omnilinux_ai_config', JSON.stringify(nonSecret));
-    } catch {}
+    const nonSecret = { ...config };
+    delete nonSecret.apiKeys;
+    delete nonSecret.customApiKey;
+    updateSetting('aiConfig', nonSecret).catch(() => {});
   };
 
   const handleSaveAiConfig = (newConfig: AiConfig) => {
@@ -147,6 +162,51 @@ export default function App() {
     setAiConfig(updated);
     persistAiConfig(updated);
   };
+
+  // Hydratation depuis le store Rust (source de vérité) + migration des anciens
+  // réglages localStorage. Les secrets ne sont jamais persistés.
+  useEffect(() => {
+    let mounted = true;
+    getSettings()
+      .then((s) => {
+        if (!mounted) return;
+        const legacySound = localStorage.getItem('omnilinux_sound_style');
+        const legacyAi = localStorage.getItem('omnilinux_ai_config');
+
+        if (typeof s.themeId === 'string') {
+          const t = TERMINAL_THEMES.find((th) => th.id === s.themeId);
+          if (t) setTheme(t);
+        }
+        if (typeof s.crtEffect === 'boolean') setCrtEffect(s.crtEffect);
+        if (typeof s.soundEnabled === 'boolean') setSoundEnabled(s.soundEnabled);
+        if (typeof s.fontSize === 'number') setFontSize(s.fontSize);
+
+        if (typeof s.soundStyle === 'string') setSoundStyle(s.soundStyle as TerminalSoundStyle);
+        else if (legacySound) {
+          setSoundStyle(legacySound as TerminalSoundStyle);
+          updateSetting('soundStyle', legacySound).catch(() => {});
+        }
+
+        if (s.aiConfig && typeof s.aiConfig === 'object') {
+          setAiConfig((prev) => ({ ...prev, ...(s.aiConfig as Partial<AiConfig>) }));
+        } else if (legacyAi) {
+          try {
+            const parsed = JSON.parse(legacyAi) || {};
+            const nonSecret = { ...parsed };
+            delete nonSecret.apiKeys;
+            delete nonSecret.customApiKey;
+            setAiConfig((prev) => ({ ...prev, ...(nonSecret as Partial<AiConfig>) }));
+            updateSetting('aiConfig', nonSecret).catch(() => {});
+          } catch {}
+        }
+
+        // Secrets jamais persistés : purge du stockage local historique.
+        try { localStorage.removeItem('omnilinux_sound_style'); } catch {}
+        try { localStorage.removeItem('omnilinux_ai_config'); } catch {}
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
 
   const distros = useDistros();
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
@@ -378,6 +438,7 @@ export default function App() {
   const handleSelectThemeById = (themeId: string) => {
     const found = TERMINAL_THEMES.find((t) => t.id === themeId);
     if (found) setTheme(found);
+    updateSetting('themeId', themeId).catch(() => {});
   };
 
   // Import VFS JSON Handler (Rust VFS)
@@ -544,13 +605,13 @@ export default function App() {
         onToggleAiDrawer={() => setAiDrawerOpen(!aiDrawerOpen)}
         aiDrawerOpen={aiDrawerOpen}
         crtEffect={crtEffect}
-        onToggleCrt={() => setCrtEffect(!crtEffect)}
+        onToggleCrt={handleToggleCrt}
         soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
+        onToggleSound={handleToggleSound}
         soundStyle={soundStyle}
         onSelectSoundStyle={handleSelectSoundStyle}
         fontSize={fontSize}
-        onChangeFontSize={setFontSize}
+        onChangeFontSize={handleChangeFontSize}
         onToggleFullscreen={handleToggleFullscreen}
         onLaunchApp={handleLaunchApp}
         onRunQuickCommand={handleRunQuickCommand}
@@ -577,9 +638,9 @@ export default function App() {
         onOpenSshSmtpModal={() => setSshSmtpModalOpen(true)}
         aiDrawerOpen={aiDrawerOpen}
         crtEffect={crtEffect}
-        onToggleCrt={() => setCrtEffect(!crtEffect)}
+        onToggleCrt={handleToggleCrt}
         soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
+        onToggleSound={handleToggleSound}
         onToggleFullscreen={handleToggleFullscreen}
         onOpenTauriModal={() => setTauriModalOpen(true)}
       />
@@ -646,16 +707,16 @@ export default function App() {
       {themeModalOpen && (
         <ThemeSelectorModal
           currentTheme={theme}
-          onSelectTheme={setTheme}
+          onSelectTheme={handleSelectThemeFull}
           onClose={() => setThemeModalOpen(false)}
           crtEffect={crtEffect}
-          onToggleCrt={() => setCrtEffect(!crtEffect)}
+          onToggleCrt={handleToggleCrt}
           soundEnabled={soundEnabled}
-          onToggleSound={() => setSoundEnabled(!soundEnabled)}
+          onToggleSound={handleToggleSound}
           soundStyle={soundStyle}
           onSelectSoundStyle={handleSelectSoundStyle}
           fontSize={fontSize}
-          onChangeFontSize={setFontSize}
+          onChangeFontSize={handleChangeFontSize}
         />
       )}
 

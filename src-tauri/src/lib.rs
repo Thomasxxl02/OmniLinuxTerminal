@@ -2,6 +2,7 @@ pub mod ai;
 pub mod distro;
 pub mod fs;
 pub mod models;
+pub mod settings;
 pub mod smtp;
 pub mod ssh;
 pub mod system;
@@ -248,18 +249,6 @@ fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo
 
 // ------------------ RÉGLAGES ------------------
 
-#[tauri::command]
-#[specta::specta]
-fn settings_get() -> Result<String, AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn settings_update(_key: String, _value: String) -> Result<(), AppError> {
-    Err(AppError::not_implemented())
-}
-
 // ------------------ SESSIONS ------------------
 
 #[tauri::command]
@@ -342,8 +331,8 @@ pub fn run() {
         distro_switch,
         system_get_telemetry,
         system_list_processes,
-        settings_get,
-        settings_update,
+        settings::settings_get,
+        settings::settings_update,
         session_get,
         session_save,
         session_export,
@@ -401,6 +390,7 @@ pub fn run() {
             app.manage(Mutex::new(AppState { vfs, executor }));
             app.manage(ssh::manager::SshManager::new(&data_dir));
             app.manage(smtp::service::SmtpManager::new(&data_dir));
+            app.manage(Mutex::new(settings::SettingsStore::new(data_dir.join("settings.json"))));
 
             Ok(())
         })

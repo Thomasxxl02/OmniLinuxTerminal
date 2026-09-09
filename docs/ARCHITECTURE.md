@@ -130,7 +130,7 @@ Retirer `unsafe-eval` de la CSP ; limiter `connect-src` ; supprimer Express + de
 4. Adapter Nano et Vim.
 5. Migrer données distros/paquets.
 6. ✅ Migrer le serveur IA vers Rust (fait — `ai/service.rs` + `ai/commands.rs`).
-7. Migrer paramètres et sessions.
+7. ✅ **Paramètres en Rust** (`settings.json` / `settings_get` / `settings_update`) — `session_*` encore stubs (à venir).
 8. Générer les types TS.
 9. Supprimer anciens moteurs et simulations.
 10. Découper React.
