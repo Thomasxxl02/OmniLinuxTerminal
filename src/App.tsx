@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle, AiConfig } from './types';
 import { useDistros, resolveDistro } from './lib/distroStore';
 import { TERMINAL_THEMES, DEFAULT_THEME } from './data/themes';
@@ -9,21 +9,34 @@ import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionIn
 import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from './lib/aiApi';
 import { getSettings, updateSetting } from './lib/settingsApi';
 import { saveSessionFromTabs, loadSessionTabs } from './lib/sessionApi';
-import { NanoEditor } from './components/NanoEditor';
-import { VimEditor } from './components/VimEditor';
-import { HtopMonitor } from './components/HtopMonitor';
-import { CmatrixCanvas } from './components/CmatrixCanvas';
-import { SlAnimation } from './components/SlAnimation';
-import { AiCopilotDrawer } from './components/AiCopilotDrawer';
-import { AiConfigModal } from './components/AiConfigModal';
-import { ThemeSelectorModal } from './components/ThemeSelectorModal';
-import { DistroInfoModal } from './components/DistroInfoModal';
-import { HelpModal } from './components/HelpModal';
-import { AboutModal } from './components/AboutModal';
-import { TauriArchitectureModal } from './components/TauriArchitectureModal';
-import { SshSmtpModal } from './components/SshSmtpModal';
-import { runTerminalCommand, applyTerminalResult } from './lib/tauriBridge';
 import { fsReset, fsExport, fsImport, fsUpdateOSRelease, errMsg } from './lib/fsApi';
+import { useTerminalController } from './hooks/useTerminalController';
+import { RiskConfirmModal } from './components/RiskConfirmModal';
+
+// ==== Fenêtres lourdes chargées à la demande (React.lazy) ====
+// Réduit le bundle initial : chaque fenêtre (éditeurs, moniteurs, modales,
+// gestionnaire réseau) n'est chargée qu'à son ouverture.
+const NanoEditor = lazy(() => import('./components/NanoEditor').then((m) => ({ default: m.NanoEditor })));
+const VimEditor = lazy(() => import('./components/VimEditor').then((m) => ({ default: m.VimEditor })));
+const HtopMonitor = lazy(() => import('./components/HtopMonitor').then((m) => ({ default: m.HtopMonitor })));
+const CmatrixCanvas = lazy(() => import('./components/CmatrixCanvas').then((m) => ({ default: m.CmatrixCanvas })));
+const SlAnimation = lazy(() => import('./components/SlAnimation').then((m) => ({ default: m.SlAnimation })));
+const AiCopilotDrawer = lazy(() => import('./components/AiCopilotDrawer').then((m) => ({ default: m.AiCopilotDrawer })));
+const AiConfigModal = lazy(() => import('./components/AiConfigModal').then((m) => ({ default: m.AiConfigModal })));
+const ThemeSelectorModal = lazy(() => import('./components/ThemeSelectorModal').then((m) => ({ default: m.ThemeSelectorModal })));
+const DistroInfoModal = lazy(() => import('./components/DistroInfoModal').then((m) => ({ default: m.DistroInfoModal })));
+const HelpModal = lazy(() => import('./components/HelpModal').then((m) => ({ default: m.HelpModal })));
+const AboutModal = lazy(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
+const TauriArchitectureModal = lazy(() => import('./components/TauriArchitectureModal').then((m) => ({ default: m.TauriArchitectureModal })));
+const ConnectionManagerModal = lazy(() => import('./components/network/ConnectionManagerModal').then((m) => ({ default: m.ConnectionManagerModal })));
+
+// Fallback des fenêtres lazy (modal / workspace).
+const modalFallback = (
+  <div className="flex items-center justify-center h-40 text-zinc-500 text-xs font-mono">Chargement…</div>
+);
+const workspaceFallback = (
+  <div className="flex items-center justify-center h-full text-zinc-500 text-xs font-mono">Chargement…</div>
+);
 
 export default function App() {
   // Theme & Appearance State
@@ -317,6 +330,9 @@ export default function App() {
     );
   };
 
+  // Contrôleur d'exécution de commande (source unique, partagé avec le terminal).
+  const controller = useTerminalController(handleUpdateTab);
+
   // Clear Terminal Screen
   const handleClearTerminal = () => {
     handleUpdateTab({ history: [] });
@@ -352,23 +368,9 @@ export default function App() {
     }
   };
 
-  // Run a quick predefined command in the terminal
+  // Run a quick predefined command in the terminal (via le contrôleur unifié).
   const handleRunQuickCommand = async (cmd: string) => {
-    const inputLineId = `cmd-${Date.now()}`;
-    const newHistory = [
-      ...activeTab.history,
-      {
-        id: inputLineId,
-        type: 'input' as const,
-        content: cmd,
-        cwd: activeTab.cwd,
-        distroId: activeTab.distroId,
-      },
-    ];
-    const updatedCmdHistory = [...activeTab.commandHistory, cmd];
-
-    const result = await runTerminalCommand(cmd, activeTab.cwd, activeTab.distroId);
-    handleUpdateTab(applyTerminalResult(result, activeTab, newHistory, updatedCmdHistory));
+    await controller.runCommand(cmd, activeTab);
   };
 
   // Réinitialiser le système de fichiers (backend Rust)
@@ -537,34 +539,9 @@ export default function App() {
     }
   };
 
-  // Execute AI Suggsted Command directly into terminal prompt
+  // Execute AI Suggested Command directly into terminal prompt (exécution réelle).
   const handleExecuteCommandFromAi = (command: string) => {
-    handleUpdateTab({
-      history: [
-        ...activeTab.history,
-        {
-          id: `ai-cmd-${Date.now()}`,
-          type: 'input',
-          content: command,
-          cwd: activeTab.cwd,
-          distroId: activeTab.distroId,
-        },
-      ],
-      commandHistory: [...activeTab.commandHistory, command],
-    });
-
-    // Execute
-    const customKey = aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
-      ? aiConfig.customApiKey.trim()
-      : undefined;
-
-    aiGenerate({
-      prompt: command,
-      distro: activeTab.distroId,
-      currentDir: activeTab.cwd,
-      model: aiConfig.model,
-      apiKey: customKey,
-    }).catch(() => {});
+    void controller.runCommand(command, activeTab);
   };
 
   // AI Request Handler
@@ -676,26 +653,36 @@ export default function App() {
         {/* Terminal Screen / Interactive App */}
         <main className="flex-1 flex flex-col h-full overflow-hidden relative">
           {activeTab.activeEditor?.type === 'nano' ? (
-            <NanoEditor
-              filePath={activeTab.activeEditor.filePath}
-              initialContent={activeTab.activeEditor.fileContent}
-              onClose={() => handleUpdateTab({ activeEditor: null })}
-            />
+            <Suspense fallback={workspaceFallback}>
+              <NanoEditor
+                filePath={activeTab.activeEditor.filePath}
+                initialContent={activeTab.activeEditor.fileContent}
+                onClose={() => handleUpdateTab({ activeEditor: null })}
+              />
+            </Suspense>
           ) : activeTab.activeEditor?.type === 'vim' ? (
-            <VimEditor
-              filePath={activeTab.activeEditor.filePath}
-              initialContent={activeTab.activeEditor.fileContent}
-              onClose={() => handleUpdateTab({ activeEditor: null })}
-            />
+            <Suspense fallback={workspaceFallback}>
+              <VimEditor
+                filePath={activeTab.activeEditor.filePath}
+                initialContent={activeTab.activeEditor.fileContent}
+                onClose={() => handleUpdateTab({ activeEditor: null })}
+              />
+            </Suspense>
           ) : activeTab.activeApp === 'htop' ? (
-            <HtopMonitor
-              distroName={activeDistro.name}
-              onClose={() => handleUpdateTab({ activeApp: 'none' })}
-            />
+            <Suspense fallback={workspaceFallback}>
+              <HtopMonitor
+                distroName={activeDistro.name}
+                onClose={() => handleUpdateTab({ activeApp: 'none' })}
+              />
+            </Suspense>
           ) : activeTab.activeApp === 'matrix' ? (
-            <CmatrixCanvas onClose={() => handleUpdateTab({ activeApp: 'none' })} />
+            <Suspense fallback={workspaceFallback}>
+              <CmatrixCanvas onClose={() => handleUpdateTab({ activeApp: 'none' })} />
+            </Suspense>
           ) : activeTab.activeApp === 'sl' ? (
-            <SlAnimation onClose={() => handleUpdateTab({ activeApp: 'none' })} />
+            <Suspense fallback={workspaceFallback}>
+              <SlAnimation onClose={() => handleUpdateTab({ activeApp: 'none' })} />
+            </Suspense>
           ) : (
             <TerminalView
               tab={activeTab}
@@ -718,67 +705,80 @@ export default function App() {
 
         {/* AI Copilot Drawer */}
         {aiDrawerOpen && (
-          <AiCopilotDrawer
-            distroId={activeTab.distroId}
-            cwd={activeTab.cwd}
-            aiConfig={aiConfig}
-            onOpenAiConfigModal={() => setAiConfigModalOpen(true)}
-            onClose={() => setAiDrawerOpen(false)}
-            onExecuteCommandInTerminal={handleExecuteCommandFromAi}
-          />
+          <Suspense fallback={modalFallback}>
+            <AiCopilotDrawer
+              distroId={activeTab.distroId}
+              cwd={activeTab.cwd}
+              aiConfig={aiConfig}
+              onOpenAiConfigModal={() => setAiConfigModalOpen(true)}
+              onClose={() => setAiDrawerOpen(false)}
+              onExecuteCommandInTerminal={handleExecuteCommandFromAi}
+            />
+          </Suspense>
         )}
       </div>
 
       {/* Modals */}
-      {themeModalOpen && (
-        <ThemeSelectorModal
-          currentTheme={theme}
-          onSelectTheme={handleSelectThemeFull}
-          onClose={() => setThemeModalOpen(false)}
-          crtEffect={crtEffect}
-          onToggleCrt={handleToggleCrt}
-          soundEnabled={soundEnabled}
-          onToggleSound={handleToggleSound}
-          soundStyle={soundStyle}
-          onSelectSoundStyle={handleSelectSoundStyle}
-          fontSize={fontSize}
-          onChangeFontSize={handleChangeFontSize}
-        />
-      )}
+      <Suspense fallback={modalFallback}>
+        {themeModalOpen && (
+          <ThemeSelectorModal
+            currentTheme={theme}
+            onSelectTheme={handleSelectThemeFull}
+            onClose={() => setThemeModalOpen(false)}
+            crtEffect={crtEffect}
+            onToggleCrt={handleToggleCrt}
+            soundEnabled={soundEnabled}
+            onToggleSound={handleToggleSound}
+            soundStyle={soundStyle}
+            onSelectSoundStyle={handleSelectSoundStyle}
+            fontSize={fontSize}
+            onChangeFontSize={handleChangeFontSize}
+          />
+        )}
 
-      {distroModalOpen && (
-        <DistroInfoModal
-          currentDistroId={activeTab.distroId}
-          onSelectDistro={handleSelectDistro}
-          onClose={() => setDistroModalOpen(false)}
-        />
-      )}
+        {distroModalOpen && (
+          <DistroInfoModal
+            currentDistroId={activeTab.distroId}
+            onSelectDistro={handleSelectDistro}
+            onClose={() => setDistroModalOpen(false)}
+          />
+        )}
 
-      {helpModalOpen && <HelpModal onClose={() => setHelpModalOpen(false)} />}
+        {helpModalOpen && <HelpModal onClose={() => setHelpModalOpen(false)} />}
 
-      {aboutModalOpen && <AboutModal onClose={() => setAboutModalOpen(false)} />}
+        {aboutModalOpen && <AboutModal onClose={() => setAboutModalOpen(false)} />}
 
-      {aiConfigModalOpen && (
-        <AiConfigModal
-          config={aiConfig}
-          isOpen={aiConfigModalOpen}
-          onClose={() => setAiConfigModalOpen(false)}
-          onSave={handleSaveAiConfig}
-        />
-      )}
+        {aiConfigModalOpen && (
+          <AiConfigModal
+            config={aiConfig}
+            isOpen={aiConfigModalOpen}
+            onClose={() => setAiConfigModalOpen(false)}
+            onSave={handleSaveAiConfig}
+          />
+        )}
 
-      {tauriModalOpen && (
-        <TauriArchitectureModal
-          isOpen={tauriModalOpen}
-          onClose={() => setTauriModalOpen(false)}
-        />
-      )}
+        {tauriModalOpen && (
+          <TauriArchitectureModal
+            isOpen={tauriModalOpen}
+            onClose={() => setTauriModalOpen(false)}
+          />
+        )}
 
-      {sshSmtpModalOpen && (
-        <SshSmtpModal
-          isOpen={sshSmtpModalOpen}
-          onClose={() => setSshSmtpModalOpen(false)}
-          onSshConnected={handleSshConnected}
+        {sshSmtpModalOpen && (
+          <ConnectionManagerModal
+            isOpen={sshSmtpModalOpen}
+            onClose={() => setSshSmtpModalOpen(false)}
+            onSshConnected={handleSshConnected}
+          />
+        )}
+      </Suspense>
+
+      {controller.riskConfirm && (
+        <RiskConfirmModal
+          command={controller.riskConfirm.command}
+          report={controller.riskConfirm.report}
+          onRun={() => void controller.runConfirmed(controller.riskConfirm.command, activeTab)}
+          onCancel={() => controller.dismissRisk()}
         />
       )}
     </div>

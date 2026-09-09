@@ -3,6 +3,10 @@ import { TerminalTab, DistroId, LinuxDistro, TerminalSoundStyle, TerminalTheme, 
 import { useDistros, resolveDistro } from '../lib/distroStore';
 import { TERMINAL_THEMES } from '../data/themes';
 import { SOUND_STYLES, playTerminalSound } from '../lib/soundEffects';
+import { MenuBarSearchModal } from './menubar/MenuBarSearchModal';
+import { MenuBarAliasModal } from './menubar/MenuBarAliasModal';
+import { MenuBarPasteModal } from './menubar/MenuBarPasteModal';
+import { MenuBarRenameModal } from './menubar/MenuBarRenameModal';
 import {
   Terminal,
   Terminal as TerminalIcon,
@@ -191,15 +195,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   const [aiCommandsSubmenuOpen, setAiCommandsSubmenuOpen] = useState<boolean>(false);
   const [aiModelsSubmenuOpen, setAiModelsSubmenuOpen] = useState<boolean>(false);
   const [isRenaming, setIsRenaming] = useState<boolean>(false);
-  const [renameValue, setRenameValue] = useState<string>('');
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState<boolean>(false);
-  const [searchFilter, setSearchFilter] = useState<string>('');
   const [aliasModalOpen, setAliasModalOpen] = useState<boolean>(false);
-  const [aliasName, setAliasName] = useState<string>('');
-  const [aliasCmd, setAliasCmd] = useState<string>('');
   const [pasteModalOpen, setPasteModalOpen] = useState<boolean>(false);
-  const [pasteValue, setPasteValue] = useState<string>('');
 
   const menuBarRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -451,17 +450,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     setOpenMenu(null);
   };
 
-  const handleSaveAlias = () => {
-    if (aliasName.trim() && aliasCmd.trim()) {
-      onRunQuickCommand(`alias ${aliasName.trim()}='${aliasCmd.trim()}'`);
-      setAliasName('');
-      setAliasCmd('');
-      setAliasModalOpen(false);
-      setCopyFeedback(`Alias "${aliasName.trim()}" créé avec succès !`);
-      setTimeout(() => setCopyFeedback(null), 2500);
-    }
-  };
-
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -475,19 +463,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
     setOpenMenu(null);
-  };
-
-  const startRenameTab = () => {
-    setRenameValue(activeTab.title);
-    setIsRenaming(true);
-    setOpenMenu(null);
-  };
-
-  const saveRenameTab = () => {
-    if (renameValue.trim() && onRenameTab) {
-      onRenameTab(activeTabId, renameValue.trim());
-    }
-    setIsRenaming(false);
   };
 
   return (
@@ -511,205 +486,52 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
       {/* Terminal History Search Modal */}
       {searchModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-2xl w-full max-w-lg text-zinc-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-sm flex items-center gap-2 text-white">
-                <Search className="w-4 h-4 text-blue-400" />
-                Recherche dans le Journal du Terminal
-              </h3>
-              <button
-                onClick={() => setSearchModalOpen(false)}
-                className="text-zinc-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <input
-              type="text"
-              placeholder="Tapez un mot-clé, commande ou motif grep..."
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              autoFocus
-              className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-blue-500"
-            />
-            <div className="max-h-60 overflow-y-auto space-y-1.5 font-mono text-[11px] bg-zinc-950/60 p-3 rounded-lg border border-zinc-800/80">
-              {activeTab.history.filter((h) =>
-                searchFilter ? h.content.toLowerCase().includes(searchFilter.toLowerCase()) : true
-              ).length === 0 ? (
-                <div className="text-zinc-500 italic text-center py-4">Aucun résultat trouvé</div>
-              ) : (
-                activeTab.history
-                  .filter((h) =>
-                    searchFilter ? h.content.toLowerCase().includes(searchFilter.toLowerCase()) : true
-                  )
-                  .map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-1.5 rounded hover:bg-zinc-800/60 flex items-start justify-between group border-b border-zinc-900/60"
-                    >
-                      <div className="truncate pr-2">
-                        <span className="text-zinc-500 mr-2 text-[10px]">[{item.type}]</span>
-                        <span className={item.type === 'error' ? 'text-rose-400' : item.type === 'input' ? 'text-emerald-400 font-bold' : 'text-zinc-300'}>
-                          {item.content}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(item.content);
-                          setCopyFeedback('Ligne copiée !');
-                          setTimeout(() => setCopyFeedback(null), 2000);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-[10px] text-zinc-400 hover:text-white px-1.5 py-0.5 bg-zinc-800 rounded shrink-0 transition"
-                      >
-                        Copier
-                      </button>
-                    </div>
-                  ))
-              )}
-            </div>
-            <div className="flex justify-between items-center text-[11px] text-zinc-400">
-              <span>{activeTab.history.length} entrées totales</span>
-              <button
-                onClick={() => setSearchModalOpen(false)}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
+        <MenuBarSearchModal
+          history={activeTab.history}
+          onClose={() => setSearchModalOpen(false)}
+          onCopy={(content) => {
+            navigator.clipboard.writeText(content);
+            setCopyFeedback('Ligne copiée !');
+            setTimeout(() => setCopyFeedback(null), 2000);
+          }}
+        />
       )}
 
       {/* Custom Alias Creator Modal */}
       {aliasModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-2xl w-full max-w-md text-zinc-100 space-y-4">
-            <h3 className="font-bold text-sm flex items-center gap-2 text-white">
-              <SlidersHorizontal className="w-4 h-4 text-purple-400" />
-              Créer un Nouvel Alias Bash
-            </h3>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block text-zinc-400 mb-1 font-mono text-[11px]">Nom de l'alias (ex: ll, update, cls)</label>
-                <input
-                  type="text"
-                  placeholder="ex: mycmd"
-                  value={aliasName}
-                  onChange={(e) => setAliasName(e.target.value)}
-                  autoFocus
-                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
-                />
-              </div>
-              <div>
-                <label className="block text-zinc-400 mb-1 font-mono text-[11px]">Commande substituée (ex: ls -la --color=auto)</label>
-                <input
-                  type="text"
-                  placeholder="ex: git status -s"
-                  value={aliasCmd}
-                  onChange={(e) => setAliasCmd(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                onClick={() => setAliasModalOpen(false)}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={handleSaveAlias}
-                disabled={!aliasName.trim() || !aliasCmd.trim()}
-                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 font-bold text-white transition"
-              >
-                Définir l'Alias
-              </button>
-            </div>
-          </div>
-        </div>
+        <MenuBarAliasModal
+          onClose={() => setAliasModalOpen(false)}
+          onSave={(name, cmd) => {
+            onRunQuickCommand(`alias ${name}='${cmd}'`);
+            setAliasModalOpen(false);
+            setCopyFeedback(`Alias "${name}" créé avec succès !`);
+            setTimeout(() => setCopyFeedback(null), 2500);
+          }}
+        />
       )}
 
       {/* Manual Paste Modal */}
       {pasteModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-2xl w-full max-w-md text-zinc-100 space-y-4">
-            <h3 className="font-bold text-sm flex items-center gap-2 text-white">
-              <ClipboardCheck className="w-4 h-4 text-emerald-400" />
-              Coller & Exécuter dans le Terminal
-            </h3>
-            <textarea
-              placeholder="Collez ou tapez ici votre commande ou script shell..."
-              value={pasteValue}
-              onChange={(e) => setPasteValue(e.target.value)}
-              rows={4}
-              autoFocus
-              className="w-full bg-zinc-950 border border-zinc-700 rounded-lg p-3 text-xs font-mono text-white focus:outline-none focus:border-emerald-500 resize-none"
-            />
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                onClick={() => {
-                  setPasteModalOpen(false);
-                  setPasteValue('');
-                }}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={() => {
-                  if (pasteValue.trim()) {
-                    onRunQuickCommand(pasteValue.trim());
-                    setPasteModalOpen(false);
-                    setPasteValue('');
-                  }
-                }}
-                disabled={!pasteValue.trim()}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 font-bold text-zinc-950"
-              >
-                Exécuter
-              </button>
-            </div>
-          </div>
-        </div>
+        <MenuBarPasteModal
+          onClose={() => setPasteModalOpen(false)}
+          onRun={(cmd) => {
+            onRunQuickCommand(cmd);
+            setCopyFeedback('Commande collée et exécutée !');
+            setTimeout(() => setCopyFeedback(null), 2500);
+          }}
+        />
       )}
 
       {/* Inline Rename Dialog */}
       {isRenaming && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 shadow-2xl w-full max-w-sm text-zinc-100 space-y-4">
-            <h3 className="font-bold text-sm flex items-center gap-2 text-white">
-              <Edit3 className="w-4 h-4 text-emerald-400" />
-              Renommer l'Onglet Actif
-            </h3>
-            <input
-              type="text"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') saveRenameTab();
-                if (e.key === 'Escape') setIsRenaming(false);
-              }}
-              autoFocus
-              className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-emerald-500"
-            />
-            <div className="flex justify-end gap-2 text-xs">
-              <button
-                onClick={() => setIsRenaming(false)}
-                className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={saveRenameTab}
-                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 font-bold text-zinc-950"
-              >
-                Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
+        <MenuBarRenameModal
+          initialTitle={activeTab.title}
+          onClose={() => setIsRenaming(false)}
+          onSave={(name) => {
+            if (name.trim() && onRenameTab) onRenameTab(activeTabId, name.trim());
+            setIsRenaming(false);
+          }}
+        />
       )}
 
       {/* Main MenuBar Bar */}
@@ -839,7 +661,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   </button>
 
                   <button
-                    onClick={startRenameTab}
+                    onClick={() => setIsRenaming(true)}
                     className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-blue-600 hover:text-white transition text-left"
                   >
                     <span className="flex items-center gap-2">
