@@ -63,6 +63,26 @@ fn terminal_complete(input: String) -> Vec<String> {
 
 #[tauri::command]
 #[specta::specta]
+fn terminal_supported_commands() -> Vec<String> {
+    TERMINAL_COMMANDS.iter().map(|c| c.to_string()).collect()
+}
+
+#[tauri::command]
+#[specta::specta]
+fn terminal_help() -> String {
+    let mut out = String::from("Commandes disponibles (OmniLinux Terminal) :\n\n");
+    for c in TERMINAL_COMMANDS {
+        out.push_str(&format!("  {c}\n"));
+    }
+    out.push_str(
+        "\nAstuce : utilisez la touche Tab pour l'autocomplétion. Tapez 'distro' pour \
+         changer de distribution.\n",
+    );
+    out
+}
+
+#[tauri::command]
+#[specta::specta]
 fn terminal_get_history() -> Vec<String> {
     Vec::new() // Phase 7 : persistance de l'historique des commandes
 }
@@ -332,6 +352,8 @@ pub fn run() {
     let builder = tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
         terminal_execute,
         terminal_complete,
+        terminal_supported_commands,
+        terminal_help,
         terminal_get_history,
         fs_read,
         fs_write,

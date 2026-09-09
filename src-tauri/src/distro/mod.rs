@@ -160,6 +160,74 @@ ossyNMMMNyMMhsssssssssssssshmmmhssssssso
              .',;::::;,'."#.to_string(),
             description: "Le laboratoire d'innovation Red Hat Enterprise Linux avec Wayland, PipeWire et DNF 5.".to_string(),
             default_packages: vec!["dnf", "rpm", "systemd", "wayland", "pipewire", "podman"].into_iter().map(String::from).collect(),
+        },
+        DistroInfo {
+            id: "centos".to_string(),
+            name: "CentOS Stream 9".to_string(),
+            version: "Stream 9".to_string(),
+            kernel: "Linux 5.14.0-427.13.1.el9_4.x86_64".to_string(),
+            default_user: "sysadmin".to_string(),
+            package_manager: "dnf".to_string(),
+            color_theme: "#26255C".to_string(),
+            ascii_logo: r#"  ______
+ /   __  \
+|   /  \  |
+|  |    | |
+ \  \  /  /
+  \____/"#.to_string(),
+            description: "Standard industriel pour serveurs d'entreprise et cloud, distribution amont de RHEL.".to_string(),
+            default_packages: vec!["dnf", "yum", "rpm", "systemd", "firewalld"].into_iter().map(String::from).collect(),
+        },
+        DistroInfo {
+            id: "opensuse".to_string(),
+            name: "openSUSE Tumbleweed".to_string(),
+            version: "Tumbleweed".to_string(),
+            kernel: "Linux 6.10.3-1-default x86_64".to_string(),
+            default_user: "gecko".to_string(),
+            package_manager: "zypper".to_string(),
+            color_theme: "#73BA25".to_string(),
+            ascii_logo: r#"   ______
+  /  ___ \
+ |  /   | |
+ |  |   | |
+ |  |___/ /
+ |  ____ /
+ |_/"#.to_string(),
+            description: "Distribution allemande réputée pour YaST, Zypper et ses snapshots Btrfs/Snapper.".to_string(),
+            default_packages: vec!["zypper", "yast2", "snapper", "btrfsprogs", "systemd"].into_iter().map(String::from).collect(),
+        },
+        DistroInfo {
+            id: "void".to_string(),
+            name: "Void Linux".to_string(),
+            version: "Rolling".to_string(),
+            kernel: "Linux 6.6.45_1 x86_64".to_string(),
+            default_user: "voidman".to_string(),
+            package_manager: "xbps".to_string(),
+            color_theme: "#478061".to_string(),
+            ascii_logo: r#"   _______
+  /  ___  \
+ /  /   \  \
+|  |     |  |
+ \  \___/  /
+  \_______/"#.to_string(),
+            description: "Distribution indépendante sans systemd, utilisant runit et XBPS pour la vitesse.".to_string(),
+            default_packages: vec!["xbps", "runit", "bash", "zsh", "coreutils"].into_iter().map(String::from).collect(),
+        },
+        DistroInfo {
+            id: "nixos".to_string(),
+            name: "NixOS 24.05".to_string(),
+            version: "24.05".to_string(),
+            kernel: "Linux 6.6.32 x86_64".to_string(),
+            default_user: "nixuser".to_string(),
+            package_manager: "nix".to_string(),
+            color_theme: "#5277C3".to_string(),
+            ascii_logo: r#"      \   \
+   \   \   \
+    \   \   \   \
+     \   \   \   \
+      \___\___\___\"#.to_string(),
+            description: "Configuration purement déclarative et reproductible via configuration.nix, rollback atomique.".to_string(),
+            default_packages: vec!["nix", "nix-env", "nix-shell", "nixos-rebuild", "bash", "git"].into_iter().map(String::from).collect(),
         }
     ]
 }

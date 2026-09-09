@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle } from '../types';
-import { LINUX_DISTROS } from '../data/distros';
+import { useDistros, resolveDistro } from '../lib/distroStore';
 import { runTerminalCommand, applyTerminalResult } from '../lib/tauriBridge';
+import { terminalSupportedCommands } from '../lib/terminalApi';
 import { playTerminalSound } from '../lib/soundEffects';
 import { Copy, Trash2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
 
@@ -38,11 +39,20 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const [inputVal, setInputVal] = useState('');
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [supportedCmds, setSupportedCmds] = useState<string[]>([]);
+
+  // Liste des commandes fournie par le moteur Rust (source de vérité unique).
+  useEffect(() => {
+    terminalSupportedCommands()
+      .then(setSupportedCmds)
+      .catch(() => setSupportedCmds([]));
+  }, []);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const currentDistro = LINUX_DISTROS.find((d) => d.id === tab.distroId) || LINUX_DISTROS[0];
+  const distros = useDistros();
+  const currentDistro = resolveDistro(distros, tab.distroId);
 
   // Sound click effect generator
   const playKeyPressSound = () => {
@@ -111,16 +121,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       return;
     }
 
-    // Tab autocompletion
+    // Tab autocompletion (source : moteur Rust, plus de liste dupliquée)
     if (e.key === 'Tab') {
       e.preventDefault();
-      const availableCmds = [
-        'help', 'man', 'neofetch', 'htop', 'top', 'ls', 'cd', 'pwd', 'mkdir', 'touch', 'rm', 'cp', 'mv',
-        'cat', 'head', 'tail', 'grep', 'tree', 'nano', 'vim', 'vi', 'clear', 'whoami', 'hostname',
-        'uname', 'date', 'uptime', 'cmatrix', 'sl', 'apt', 'apt-get', 'pacman', 'dnf', 'yum', 'apk',
-        'zypper', 'distro', 'tauri', 'cargo', 'rustc'
-      ];
-      const match = availableCmds.find((c) => c.startsWith(inputVal));
+      const match = supportedCmds.find((c) => c.startsWith(inputVal));
       if (match) {
         setInputVal(match + ' ');
       }

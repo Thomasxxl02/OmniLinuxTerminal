@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TerminalTab, DistroId, LinuxDistro, TerminalSoundStyle, TerminalTheme, AiConfig } from '../types';
-import { LINUX_DISTROS } from '../data/distros';
+import { useDistros, resolveDistro } from '../lib/distroStore';
 import { TERMINAL_THEMES } from '../data/themes';
 import { SOUND_STYLES, playTerminalSound } from '../lib/soundEffects';
 import {
@@ -205,7 +205,8 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
-  const activeDistro = LINUX_DISTROS.find((d) => d.id === activeTab?.distroId) || LINUX_DISTROS[0];
+  const distros = useDistros();
+  const activeDistro = resolveDistro(distros, activeTab?.distroId);
 
   // Close menus on click outside
   useEffect(() => {
@@ -797,7 +798,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         <div className="px-3 py-1 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
                           Distributions Disponibles
                         </div>
-                        {LINUX_DISTROS.map((d) => (
+                        {distros.map((d) => (
                           <button
                             key={d.id}
                             onClick={() => executeAndClose(() => onNewTab(d.id))}
@@ -1631,7 +1632,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         <div className="px-3 py-1 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
                           Démarrer avec l'OS :
                         </div>
-                        {LINUX_DISTROS.map((d) => (
+                        {distros.map((d) => (
                           <button
                             key={d.id}
                             onClick={() => executeAndClose(() => onNewTab(d.id))}
@@ -1727,7 +1728,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                   </div>
 
                   <div className="max-h-56 overflow-y-auto">
-                    {LINUX_DISTROS.map((distro) => {
+                    {distros.map((distro) => {
                       const isCurrent = activeTab.distroId === distro.id;
                       return (
                         <button

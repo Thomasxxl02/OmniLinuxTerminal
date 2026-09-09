@@ -1,6 +1,6 @@
 import React from 'react';
 import { TerminalTab, DistroId, LinuxDistro } from '../types';
-import { LINUX_DISTROS } from '../data/distros';
+import { useDistros, resolveDistro } from '../lib/distroStore';
 import {
   Plus,
   X,
@@ -59,7 +59,8 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenTauriModal,
 }) => {
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
-  const activeDistro = LINUX_DISTROS.find((d) => d.id === activeTab?.distroId) || LINUX_DISTROS[0];
+  const distros = useDistros();
+  const activeDistro = resolveDistro(distros, activeTab?.distroId);
 
   return (
     <header className="bg-zinc-950/90 border-b border-zinc-800 text-zinc-100 flex flex-col sm:flex-row justify-between items-stretch sm:items-center px-3 py-2 gap-2 select-none">
@@ -67,7 +68,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
       <div className="flex items-center gap-1 overflow-x-auto scrollbar-none max-w-full">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
-          const distro = LINUX_DISTROS.find((d) => d.id === tab.distroId) || LINUX_DISTROS[0];
+          const distro = resolveDistro(distros, tab.distroId);
 
           return (
             <div

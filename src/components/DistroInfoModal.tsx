@@ -1,5 +1,5 @@
 import React from 'react';
-import { LINUX_DISTROS } from '../data/distros';
+import { useDistros } from '../lib/distroStore';
 import { DistroId, LinuxDistro } from '../types';
 import { X, Check, Terminal, Cpu, Box, Shield, Layers } from 'lucide-react';
 
@@ -14,6 +14,7 @@ export const DistroInfoModal: React.FC<DistroInfoModalProps> = ({
   onSelectDistro,
   onClose,
 }) => {
+  const distros = useDistros();
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-4xl p-6 shadow-2xl text-zinc-100 flex flex-col max-h-[90vh]">
@@ -38,7 +39,7 @@ export const DistroInfoModal: React.FC<DistroInfoModalProps> = ({
 
         {/* Distros Grid */}
         <div className="flex-1 overflow-y-auto py-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {LINUX_DISTROS.map((distro) => {
+          {distros.map((distro) => {
             const isSelected = distro.id === currentDistroId;
             return (
               <div

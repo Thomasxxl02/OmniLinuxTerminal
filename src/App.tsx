@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle, AiConfig } from './types';
-import { LINUX_DISTROS, DEFAULT_DISTRO } from './data/distros';
+import { useDistros, resolveDistro } from './lib/distroStore';
 import { TERMINAL_THEMES, DEFAULT_THEME } from './data/themes';
 import { MenuBar } from './components/MenuBar';
 import { TerminalHeader } from './components/TerminalHeader';
@@ -140,8 +140,9 @@ export default function App() {
     } catch {}
   };
 
+  const distros = useDistros();
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
-  const activeDistro = LINUX_DISTROS.find((d) => d.id === activeTab.distroId) || DEFAULT_DISTRO;
+  const activeDistro = resolveDistro(distros, activeTab.distroId);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -170,7 +171,7 @@ export default function App() {
 
   // New Tab Handler
   const handleNewTab = (distroId: DistroId = activeTab.distroId) => {
-    const distro = LINUX_DISTROS.find((d) => d.id === distroId) || DEFAULT_DISTRO;
+    const distro = resolveDistro(distros, distroId);
     const newTabId = `tab-${Date.now()}`;
     const newTab: TerminalTab = {
       id: newTabId,
@@ -421,7 +422,7 @@ export default function App() {
 
   // Select Distro for Current Tab (Rust VFS: met à jour /etc/os-release)
   const handleSelectDistro = async (distroId: DistroId) => {
-    const distro = LINUX_DISTROS.find((d) => d.id === distroId);
+    const distro = distros.find((d) => d.id === distroId);
     try {
       await fsUpdateOSRelease(distro?.name || 'Linux', distro?.version || '1.0');
     } catch (e: any) {
