@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { secretSave } from '../lib/secretsApi';
 import {
   Server,
   Mail,
@@ -61,6 +62,15 @@ const IDLE: Status = { phase: 'idle', message: '' };
 
 export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onSshConnected }) => {
   const [activeTab, setActiveTab] = useState<'ssh' | 'smtp'>('ssh');
+
+  // Remise à zéro des secrets à la fermeture (jamais de mot de passe résiduel).
+  useEffect(() => {
+    if (!isOpen) {
+      setSshPassword('');
+      setSmtpPassword('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // SSH Form State
   const [sshHost, setSshHost] = useState('192.168.1.100');
@@ -294,12 +304,13 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
   };
 
   const saveSshProfile = async () => {
-    if (!sshProfileName.trim()) return;
+    const profileName = sshProfileName.trim();
+    if (!profileName) return;
     try {
       const cfg = buildSshConfig();
       await sshSaveProfile({
         id: '',
-        name: sshProfileName.trim(),
+        name: profileName,
         host: cfg.host,
         port: cfg.port,
         user: cfg.user,
@@ -311,6 +322,10 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
       });
       setSshProfileName('');
       await reloadSshProfiles();
+      // Secret stocké au trousseau système (jamais en localStorage / logs) s'il est renseigné.
+      if (sshPassword) {
+        await secretSave('ssh', profileName, sshPassword);
+      }
     } catch (e) {
       setSshStatus({ phase: 'error', message: 'Sauvegarde du profil SSH échouée', detail: errMsg(e) });
     }
@@ -327,12 +342,13 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
   };
 
   const saveSmtpProfile = async () => {
-    if (!smtpProfileName.trim()) return;
+    const profileName = smtpProfileName.trim();
+    if (!profileName) return;
     try {
       const cfg = buildSmtpConfig();
       await smtpSaveProfile({
         id: '',
-        name: smtpProfileName.trim(),
+        name: profileName,
         host: cfg.host,
         port: cfg.port,
         security: cfg.security,
@@ -343,6 +359,10 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onS
       });
       setSmtpProfileName('');
       await reloadSmtpProfiles();
+      // Secret stocké au trousseau système s'il est renseigné.
+      if (smtpPassword) {
+        await secretSave('smtp', profileName, smtpPassword);
+      }
     } catch (e) {
       setSmtpTestStatus({ phase: 'error', message: 'Sauvegarde du profil SMTP échouée', detail: errMsg(e) });
     }

@@ -310,6 +310,9 @@ pub fn run() {
     let builder = tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
         terminal_execute,
         risk_analyze,
+        security::secrets::secret_save,
+        security::secrets::secret_get,
+        security::secrets::secret_delete,
         terminal_complete,
         terminal_supported_commands,
         terminal_help,
@@ -412,6 +415,9 @@ mod tests {
         let builder = tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
             terminal_execute,
             risk_analyze,
+            security::secrets::secret_save,
+            security::secrets::secret_get,
+            security::secrets::secret_delete,
             fs_read,
             fs_write,
             distro_list,

@@ -137,7 +137,11 @@ Retirer `unsafe-eval` de la CSP ; limiter `connect-src` ; supprimer Express + de
 11. Tests + sécurité.
 
 ## 6. Garde-fous sécurité (appliqués récemment)
-Plus de serveur HTTP exposé : les opérations réseau/IA passent par IPC Tauri (Rust). Aucune surface d'écoute, erreurs et timeouts centralisés, secrets en mémoire (clé API transmise par requête, jamais persistée).
+Plus de serveur HTTP exposé : les opérations réseau/IA passent par IPC Tauri (Rust). Aucune surface d'écoute, erreurs et timeouts centralisés, secrets en mémoire (clé API transmise par requête, jamais persistée). Durcissement (P2/P3/P4) :
+- **Analyse de risque** (module `security/risk.rs`) : rapport `RiskReport` (niveau/raisons/confirmation/blocage) sur les commandes tokenisées ; blocage dur critique dans `terminal_execute` + gate/confirmation frontend.
+- **Trousseau système** (module `security/secrets.rs`, keyring avec repli mémoire) : secrets SSH/SMTP stockés au trousseau, jamais en localStorage ni logs ; reset des formulaires à la fermeture ; expurgation des secrets à la copie.
+- **CSP durcie** : retiré `unsafe-eval` + `connect-src https://*` ; capabilities réduites à `core:default` ; `tauri-plugin-shell` supprimé (inutilisé).
+- SSH sans concaténation shell : `SshConfig` typée → `ssh2` en direct.
 
 ---
 

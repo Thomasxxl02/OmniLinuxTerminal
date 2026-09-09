@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Sparkles, Terminal, Copy, Check, Play, HelpCircle, AlertTriangle, ArrowRight, ShieldCheck, Settings, Key } from 'lucide-react';
 import { DistroId, AiConfig, backendProviderIdForModel } from '../types';
 import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from '../lib/aiApi';
+import { redactSecrets } from '../lib/secretsApi';
 
 interface AiCopilotDrawerProps {
   distroId: DistroId;
@@ -41,7 +42,7 @@ export const AiCopilotDrawer: React.FC<AiCopilotDrawerProps> = ({
   const [copiedText, setCopiedText] = useState('');
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(redactSecrets(text));
     setCopiedText(text);
     setTimeout(() => setCopiedText(''), 2000);
   };
