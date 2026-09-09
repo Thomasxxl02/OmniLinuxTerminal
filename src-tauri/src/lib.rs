@@ -2,6 +2,7 @@ pub mod ai;
 pub mod distro;
 pub mod fs;
 pub mod models;
+pub mod security;
 pub mod settings;
 pub mod session;
 pub mod smtp;
@@ -13,7 +14,7 @@ use distro::{get_distro_by_id, get_supported_distros};
 use fs::VirtualFileSystem;
 use models::{
     AppError, CommandResult, DistroInfo, FileNode,
-    ProcessItem, SystemTelemetry, TauriBackendInfo,
+    ProcessItem, RiskReport, SystemTelemetry, TauriBackendInfo,
 };
 use std::sync::Mutex;
 use system::SystemMonitor;
@@ -41,7 +42,29 @@ fn terminal_execute(
     distro_id: String,
 ) -> CommandResult {
     let app_state = state.lock().unwrap();
+    // Garde-fou sécurité (défense en profondeur) : toute commande classée
+    // critique est bloquée côté backend, indépendamment de la confirmation frontend.
+    let report = security::risk::analyze(&cmd);
+    if report.blocked {
+        return CommandResult {
+            stdout: format!(
+                "⛔ Commande bloquée (analyse de risque) : {}\nRaisons : {}",
+                cmd,
+                report.reasons.join(" ; ")
+            ),
+            stderr: String::new(),
+            exit_code: 1,
+            cwd,
+            effects: Vec::new(),
+        };
+    }
     app_state.executor.execute(&cmd, &cwd, &distro_id, &[])
+}
+
+#[tauri::command]
+#[specta::specta]
+fn risk_analyze(cmd: String) -> RiskReport {
+    security::risk::analyze(&cmd)
 }
 
 const TERMINAL_COMMANDS: &[&str] = &[
@@ -286,6 +309,7 @@ fn distro_get_info(distro_id: String) -> Option<DistroInfo> {
 pub fn run() {
     let builder = tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
         terminal_execute,
+        risk_analyze,
         terminal_complete,
         terminal_supported_commands,
         terminal_help,
@@ -387,6 +411,7 @@ mod tests {
         let ts_path = std::env::temp_dir().join("omni_ipc_specta.ts");
         let builder = tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
             terminal_execute,
+            risk_analyze,
             fs_read,
             fs_write,
             distro_list,

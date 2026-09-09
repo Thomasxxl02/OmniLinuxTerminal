@@ -4,7 +4,8 @@ import { useDistros, resolveDistro } from '../lib/distroStore';
 import { runTerminalCommand, applyTerminalResult } from '../lib/tauriBridge';
 import { terminalSupportedCommands } from '../lib/terminalApi';
 import { playTerminalSound } from '../lib/soundEffects';
-import { Copy, Trash2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
+import { Copy, Trash2, Terminal as TerminalIcon, Sparkles, AlertTriangle } from 'lucide-react';
+import { riskAnalyze, RiskReport } from '../lib/riskApi';
 
 export interface SshSessionState {
   connected: boolean;
@@ -40,6 +41,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const [isExecuting, setIsExecuting] = useState(false);
   const [supportedCmds, setSupportedCmds] = useState<string[]>([]);
+  const [riskConfirm, setRiskConfirm] = useState<{ command: string; report: RiskReport } | null>(null);
 
   // Liste des commandes fournie par le moteur Rust (source de vérité unique).
   useEffect(() => {
@@ -105,11 +107,61 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
     // Update command history array
     const updatedCmdHistory = [...tab.commandHistory, command];
 
+    // Garde-fou sécurité : analyse de risque avant exécution (source Rust).
+    let report: RiskReport | null = null;
+    try {
+      report = await riskAnalyze(trimmed);
+    } catch {
+      report = null;
+    }
+
+    if (report && report.blocked) {
+      onUpdateTab(
+        applyTerminalResult(
+          {
+            stdout: `⛔ Commande bloquée (analyse de risque).\n${report.reasons.join('\n')}`,
+            stderr: '',
+            exitCode: 1,
+            cwd: tab.cwd,
+            effects: [],
+          },
+          tab,
+          newHistory,
+          updatedCmdHistory
+        )
+      );
+      return;
+    }
+
+    if (report && report.needsConfirmation) {
+      setRiskConfirm({ command, report });
+      return;
+    }
+
     setIsExecuting(true);
     const result = await runTerminalCommand(command, tab.cwd, tab.distroId);
     setIsExecuting(false);
 
     onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
+  };
+
+  const handleRiskDecision = (run: boolean) => {
+    if (!riskConfirm) return;
+    const command = riskConfirm.command;
+    setRiskConfirm(null);
+    if (!run) return;
+    const newHistory = [
+      ...tab.history,
+      { id: `line-${Date.now()}`, type: 'input' as const, content: command, cwd: tab.cwd, distroId: tab.distroId },
+    ];
+    const updatedCmdHistory = [...tab.commandHistory, command];
+    setIsExecuting(true);
+    runTerminalCommand(command, tab.cwd, tab.distroId)
+      .then((result) => {
+        setIsExecuting(false);
+        onUpdateTab(applyTerminalResult(result, tab, newHistory, updatedCmdHistory));
+      })
+      .catch(() => setIsExecuting(false));
   };
 
   // Keyboard navigation & tab autocompletion
@@ -330,6 +382,39 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           <Trash2 className="w-3 h-3" /> Effacer
         </button>
       </div>
+
+      {riskConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-amber-500/40 rounded-xl p-5 max-w-lg w-full text-zinc-100 shadow-2xl">
+            <h3 className="font-semibold text-amber-300 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> Commande à risque
+            </h3>
+            <p className="text-xs text-zinc-400 mt-1">
+              Niveau : <span className="text-amber-300 font-mono uppercase">{riskConfirm.report.level}</span>
+            </p>
+            <pre className="mt-3 text-xs bg-black/40 border border-zinc-800 rounded px-2 py-1.5 whitespace-pre-wrap break-all">{riskConfirm.command}</pre>
+            <ul className="mt-3 text-xs text-zinc-300 list-disc pl-5 space-y-1">
+              {riskConfirm.report.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => handleRiskDecision(false)}
+                className="px-3 py-1.5 rounded text-xs bg-zinc-800 hover:bg-zinc-700"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => handleRiskDecision(true)}
+                className="px-3 py-1.5 rounded text-xs bg-amber-500 text-black font-semibold hover:bg-amber-400"
+              >
+                Exécuter quand même
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

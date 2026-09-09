@@ -160,6 +160,26 @@ pub struct AiDebugResponse {
     pub corrected_command: String,
 }
 
+/// Niveau de risque d'une commande analysée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+/// Rapport d'analyse de risque d'une commande.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RiskReport {
+    pub level: RiskLevel,
+    pub reasons: Vec<String>,
+    pub needs_confirmation: bool,
+    pub blocked: bool,
+}
+
 /// Statistiques système et télémétrie
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -294,23 +314,4 @@ pub enum TerminalEffect {
     SwitchDistro {
         distro_id: String,
     },
-}
-
-/// Niveau de risque d'une commande (Phase 6 — module security).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub enum RiskLevel {
-    Safe,
-    Caution,
-    Dangerous,
-    Blocked,
-}
-
-/// Évaluation de sécurité structurée d'une commande (Phase 6).
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct SafetyAssessment {
-    pub level: RiskLevel,
-    pub reasons: Vec<String>,
-    pub requires_confirmation: bool,
 }
