@@ -8,6 +8,7 @@ import { TerminalView, SshSessionState } from './components/TerminalView';
 import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionInfo } from './lib/sshApi';
 import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from './lib/aiApi';
 import { getSettings, updateSetting } from './lib/settingsApi';
+import { saveSessionFromTabs, loadSessionTabs } from './lib/sessionApi';
 import { NanoEditor } from './components/NanoEditor';
 import { VimEditor } from './components/VimEditor';
 import { HtopMonitor } from './components/HtopMonitor';
@@ -207,6 +208,31 @@ export default function App() {
       .catch(() => {});
     return () => { mounted = false; };
   }, []);
+
+  // Hydratation de la session (onglets) depuis le store Rust + sauvegarde auto.
+  const sessionHydrated = useRef(false);
+  useEffect(() => {
+    let mounted = true;
+    loadSessionTabs()
+      .then((s) => {
+        if (!mounted) return;
+        if (s) {
+          setTabs(s.tabs);
+          setActiveTabId(s.activeTabId);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) sessionHydrated.current = true;
+      });
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (sessionHydrated.current) {
+      saveSessionFromTabs(tabs, activeTabId).catch(() => {});
+    }
+  }, [tabs, activeTabId]);
 
   const distros = useDistros();
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];

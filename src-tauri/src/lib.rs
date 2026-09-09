@@ -3,6 +3,7 @@ pub mod distro;
 pub mod fs;
 pub mod models;
 pub mod settings;
+pub mod session;
 pub mod smtp;
 pub mod ssh;
 pub mod system;
@@ -251,30 +252,6 @@ fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo
 
 // ------------------ SESSIONS ------------------
 
-#[tauri::command]
-#[specta::specta]
-fn session_get() -> Result<String, AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn session_save(_data: String) -> Result<(), AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn session_export() -> Result<String, AppError> {
-    Err(AppError::not_implemented())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn session_import(_json: String) -> Result<(), AppError> {
-    Err(AppError::not_implemented())
-}
-
 // ------------------ ALIAS (rétro-compat) ------------------
 
 #[tauri::command]
@@ -333,10 +310,10 @@ pub fn run() {
         system_list_processes,
         settings::settings_get,
         settings::settings_update,
-        session_get,
-        session_save,
-        session_export,
-        session_import,
+        session::session_get,
+        session::session_save,
+        session::session_export,
+        session::session_import,
         ai::commands::ai_generate,
         ai::commands::ai_explain,
         ai::commands::ai_debug,
@@ -391,6 +368,7 @@ pub fn run() {
             app.manage(ssh::manager::SshManager::new(&data_dir));
             app.manage(smtp::service::SmtpManager::new(&data_dir));
             app.manage(Mutex::new(settings::SettingsStore::new(data_dir.join("settings.json"))));
+            app.manage(Mutex::new(session::SessionStore::new(data_dir.join("session.json"))));
 
             Ok(())
         })
@@ -419,6 +397,10 @@ mod tests {
             ai::commands::ai_test,
             settings::settings_get,
             settings::settings_update,
+            session::session_get,
+            session::session_save,
+            session::session_export,
+            session::session_import,
             tauri_get_backend_info,
         ]);
         builder
