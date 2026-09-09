@@ -17,6 +17,7 @@ import { DistroInfoModal } from './components/DistroInfoModal';
 import { HelpModal } from './components/HelpModal';
 import { AboutModal } from './components/AboutModal';
 import { TauriArchitectureModal } from './components/TauriArchitectureModal';
+import { SshSmtpModal } from './components/SshSmtpModal';
 import { runTerminalCommand, applyTerminalResult } from './lib/tauriBridge';
 import { fsReset, fsExport, fsImport, fsUpdateOSRelease, errMsg } from './lib/fsApi';
 
@@ -69,6 +70,7 @@ export default function App() {
   const [helpModalOpen, setHelpModalOpen] = useState<boolean>(false);
   const [aboutModalOpen, setAboutModalOpen] = useState<boolean>(false);
   const [tauriModalOpen, setTauriModalOpen] = useState<boolean>(false);
+  const [sshSmtpModalOpen, setSshSmtpModalOpen] = useState<boolean>(false);
 
   // Gemini AI Model & API Key Configuration State
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => {
@@ -526,6 +528,7 @@ export default function App() {
         onImportFileSystem={handleImportFileSystem}
         onDownloadLog={handleDownloadLog}
         onOpenTauriModal={() => setTauriModalOpen(true)}
+        onOpenSshSmtpModal={() => setSshSmtpModalOpen(true)}
       />
 
       {/* Terminal Tabs & Header Controls */}
@@ -540,6 +543,7 @@ export default function App() {
         onOpenHelpModal={() => setHelpModalOpen(true)}
         onToggleAiDrawer={() => setAiDrawerOpen(!aiDrawerOpen)}
         onOpenAiConfigModal={() => setAiConfigModalOpen(true)}
+        onOpenSshSmtpModal={() => setSshSmtpModalOpen(true)}
         aiDrawerOpen={aiDrawerOpen}
         crtEffect={crtEffect}
         onToggleCrt={() => setCrtEffect(!crtEffect)}
@@ -646,6 +650,14 @@ export default function App() {
         <TauriArchitectureModal
           isOpen={tauriModalOpen}
           onClose={() => setTauriModalOpen(false)}
+        />
+      )}
+
+      {sshSmtpModalOpen && (
+        <SshSmtpModal
+          isOpen={sshSmtpModalOpen}
+          onClose={() => setSshSmtpModalOpen(false)}
+          onRunCommand={handleRunQuickCommand}
         />
       )}
     </div>

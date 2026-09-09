@@ -14,6 +14,7 @@ import {
   Layers,
   Terminal as TerminalIcon,
   Settings,
+  Server,
 } from 'lucide-react';
 
 interface TerminalHeaderProps {
@@ -27,6 +28,7 @@ interface TerminalHeaderProps {
   onOpenHelpModal: () => void;
   onToggleAiDrawer: () => void;
   onOpenAiConfigModal?: () => void;
+  onOpenSshSmtpModal?: () => void;
   aiDrawerOpen: boolean;
   crtEffect: boolean;
   onToggleCrt: () => void;
@@ -47,6 +49,7 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
   onOpenHelpModal,
   onToggleAiDrawer,
   onOpenAiConfigModal,
+  onOpenSshSmtpModal,
   aiDrawerOpen,
   crtEffect,
   onToggleCrt,
@@ -117,6 +120,18 @@ export const TerminalHeader: React.FC<TerminalHeaderProps> = ({
           <Layers className="w-3.5 h-3.5 text-emerald-400" />
           <span className="font-semibold">{activeDistro.name.split(' ')[0]}</span>
         </button>
+
+        {/* SSH & SMTP Connection Manager */}
+        {onOpenSshSmtpModal && (
+          <button
+            onClick={onOpenSshSmtpModal}
+            title="Formulaire Connexion SSH & SMTP"
+            className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 px-2.5 py-1.5 rounded-lg border border-zinc-800 text-xs font-medium transition hover:border-emerald-500/40"
+          >
+            <Server className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden md:inline font-semibold">SSH / SMTP</span>
+          </button>
+        )}
 
         {/* AI Copilot Toggle & Config */}
         <div className="flex items-center rounded-lg border border-emerald-500/30 overflow-hidden bg-emerald-500/10">

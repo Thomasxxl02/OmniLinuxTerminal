@@ -123,6 +123,7 @@ interface MenuBarProps {
   onImportFileSystem?: (jsonContent: string) => void;
   onDownloadLog?: () => void;
   onOpenTauriModal?: () => void;
+  onOpenSshSmtpModal?: () => void;
 }
 
 type MenuKey = 'file' | 'edit' | 'view' | 'distros' | 'tools' | 'ai' | 'help' | null;
@@ -133,6 +134,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
   aiConfig,
   onOpenAiConfigModal,
   onSelectAiModel,
+  onOpenSshSmtpModal,
   onSelectTab,
   onNewTab,
   onNewGuestTab,
