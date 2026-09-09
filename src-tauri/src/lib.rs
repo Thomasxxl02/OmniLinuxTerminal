@@ -2,6 +2,8 @@ pub mod ai;
 pub mod distro;
 pub mod fs;
 pub mod models;
+pub mod smtp;
+pub mod ssh;
 pub mod system;
 pub mod terminal;
 
@@ -364,6 +366,20 @@ pub fn run() {
         distro_get_info,
         ai_generate_command,
         tauri_get_backend_info,
+        ssh::commands::ssh_validate_config,
+        ssh::commands::ssh_test_connection,
+        ssh::commands::ssh_connect,
+        ssh::commands::ssh_disconnect,
+        ssh::commands::ssh_is_connected,
+        ssh::commands::ssh_list_profiles,
+        ssh::commands::ssh_save_profile,
+        ssh::commands::ssh_delete_profile,
+        smtp::commands::smtp_validate_config,
+        smtp::commands::smtp_test_connection,
+        smtp::commands::smtp_send_test,
+        smtp::commands::smtp_list_profiles,
+        smtp::commands::smtp_save_profile,
+        smtp::commands::smtp_delete_profile,
     ]);
 
     // Export des types TypeScript via specta (debug uniquement).
@@ -392,6 +408,8 @@ pub fn run() {
 
             let executor = ShellExecutor::new(vfs.clone());
             app.manage(Mutex::new(AppState { vfs, executor }));
+            app.manage(ssh::manager::SshManager::new(&data_dir));
+            app.manage(smtp::service::SmtpManager::new(&data_dir));
 
             Ok(())
         })

@@ -657,7 +657,6 @@ export default function App() {
         <SshSmtpModal
           isOpen={sshSmtpModalOpen}
           onClose={() => setSshSmtpModalOpen(false)}
-          onRunCommand={handleRunQuickCommand}
         />
       )}
     </div>

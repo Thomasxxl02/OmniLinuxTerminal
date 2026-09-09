@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Server,
   Mail,
@@ -9,11 +9,8 @@ import {
   Globe,
   Lock,
   User,
-  Check,
-  AlertCircle,
-  Copy,
   CheckCircle2,
-  Zap,
+  AlertCircle,
   FolderKey,
   Save,
   Trash2,
@@ -23,45 +20,73 @@ import {
   Wifi,
   ChevronRight,
   RefreshCw,
+  Plug,
 } from 'lucide-react';
+import {
+  sshTestConnection,
+  sshConnect,
+  sshDisconnect,
+  sshSaveProfile,
+  sshListProfiles,
+  sshDeleteProfile,
+  SshConfig,
+  SshProfile,
+} from '../lib/sshApi';
+import {
+  smtpTestConnection,
+  smtpSendTest,
+  smtpSaveProfile,
+  smtpListProfiles,
+  smtpDeleteProfile,
+  SmtpConfig,
+  SmtpProfile,
+} from '../lib/smtpApi';
 
 interface SshSmtpModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onRunCommand: (command: string) => void;
 }
 
-export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
-  isOpen,
-  onClose,
-  onRunCommand,
-}) => {
+type StatusPhase = 'idle' | 'running' | 'success' | 'error';
+
+interface Status {
+  phase: StatusPhase;
+  message: string;
+  detail?: string;
+}
+
+const IDLE: Status = { phase: 'idle', message: '' };
+
+export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'ssh' | 'smtp'>('ssh');
 
   // SSH Form State
   const [sshHost, setSshHost] = useState('192.168.1.100');
   const [sshPort, setSshPort] = useState('22');
   const [sshUser, setSshUser] = useState('root');
-  const [sshAuthType, setSshAuthType] = useState<'password' | 'key'>('key');
+  const [sshAuthType, setSshAuthType] = useState<'key' | 'password'>('key');
   const [sshPassword, setSshPassword] = useState('');
   const [sshKeyPath, setSshKeyPath] = useState('~/.ssh/id_rsa');
   const [sshKeepAlive, setSshKeepAlive] = useState('60');
   const [sshPortForwarding, setSshPortForwarding] = useState('');
+  const [sshStatus, setSshStatus] = useState<Status>(IDLE);
   const [sshConnected, setSshConnected] = useState(false);
-  const [sshCopied, setSshCopied] = useState(false);
+  const [sshProfiles, setSshProfiles] = useState<SshProfile[]>([]);
+  const [sshProfileName, setSshProfileName] = useState('');
 
   // SMTP Form State
   const [smtpHost, setSmtpHost] = useState('smtp.gmail.com');
   const [smtpPort, setSmtpPort] = useState('587');
-  const [smtpSecurity, setSmtpSecurity] = useState<'starttls' | 'ssl' | 'none'>('starttls');
+  const [smtpSecurity, setSmtpSecurity] = useState<'startTls' | 'ssl' | 'none'>('startTls');
   const [smtpUser, setSmtpUser] = useState('admin@example.com');
   const [smtpPassword, setSmtpPassword] = useState('');
   const [smtpSender, setSmtpSender] = useState('noreply@example.com');
   const [smtpSenderName, setSmtpSenderName] = useState('OmniLinux Admin');
   const [testRecipient, setTestRecipient] = useState('test@example.com');
-  const [smtpTestStatus, setSmtpTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
-  const [smtpTestLog, setSmtpTestLog] = useState('');
-  const [smtpCopied, setSmtpCopied] = useState(false);
+  const [smtpTestStatus, setSmtpTestStatus] = useState<Status>(IDLE);
+  const [smtpSendStatus, setSmtpSendStatus] = useState<Status>(IDLE);
+  const [smtpProfiles, setSmtpProfiles] = useState<SmtpProfile[]>([]);
+  const [smtpProfileName, setSmtpProfileName] = useState('');
 
   // Presets
   const applySshPreset = (preset: 'ubuntu' | 'aws' | 'debian' | 'alpine') => {
@@ -96,12 +121,12 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
       case 'gmail':
         setSmtpHost('smtp.gmail.com');
         setSmtpPort('587');
-        setSmtpSecurity('starttls');
+        setSmtpSecurity('startTls');
         break;
       case 'outlook':
         setSmtpHost('smtp.office365.com');
         setSmtpPort('587');
-        setSmtpSecurity('starttls');
+        setSmtpSecurity('startTls');
         break;
       case 'ovh':
         setSmtpHost('ssl0.ovh.net');
@@ -111,73 +136,279 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
       case 'sendgrid':
         setSmtpHost('smtp.sendgrid.net');
         setSmtpPort('587');
-        setSmtpSecurity('starttls');
+        setSmtpSecurity('startTls');
         setSmtpUser('apikey');
         break;
     }
   };
 
+  const parsePort = (v: string, fallback: number) => {
+    const n = Number.parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
+
+  const buildSshConfig = (): SshConfig => ({
+    host: sshHost.trim(),
+    port: parsePort(sshPort, 22),
+    user: sshUser.trim(),
+    authType: sshAuthType,
+    password: sshPassword || undefined,
+    keyPath: sshKeyPath.trim() || undefined,
+    keepAlive: parsePort(sshKeepAlive, 60),
+    portForwarding: sshPortForwarding.trim() || undefined,
+  });
+
+  const buildSmtpConfig = (): SmtpConfig => ({
+    host: smtpHost.trim(),
+    port: parsePort(smtpPort, 587),
+    security: smtpSecurity,
+    user: smtpUser.trim() || undefined,
+    password: smtpPassword || undefined,
+    fromAddress: smtpSender.trim(),
+    fromName: smtpSenderName.trim() || undefined,
+    toAddress: testRecipient.trim() || undefined,
+  });
+
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  // ---------------- SSH handlers ----------------
+  const handleTestSsh = async () => {
+    setSshStatus({ phase: 'running', message: `Test de connexion SSH vers ${sshHost}:${sshPort}...` });
+    try {
+      const res = await sshTestConnection(buildSshConfig());
+      setSshStatus({
+        phase: 'success',
+        message: res.message,
+        detail: res.serverBanner ? `Bannière serveur : ${res.serverBanner}` : undefined,
+      });
+    } catch (e) {
+      setSshStatus({ phase: 'error', message: 'Test de connexion échoué', detail: errMsg(e) });
+    }
+  };
+
+  const handleConnectSsh = async () => {
+    setSshStatus({ phase: 'running', message: `Connexion SSH à ${sshHost}:${sshPort}...` });
+    try {
+      const res = await sshConnect(buildSshConfig());
+      setSshConnected(true);
+      setSshStatus({
+        phase: 'success',
+        message: res.message,
+        detail: res.serverBanner ? `Bannière serveur : ${res.serverBanner}` : undefined,
+      });
+    } catch (e) {
+      setSshConnected(false);
+      setSshStatus({ phase: 'error', message: 'Connexion SSH échouée', detail: errMsg(e) });
+    }
+  };
+
+  const handleDisconnectSsh = async () => {
+    try {
+      await sshDisconnect();
+      setSshConnected(false);
+      setSshStatus({ phase: 'idle', message: '' });
+    } catch (e) {
+      setSshStatus({ phase: 'error', message: 'Déconnexion échouée', detail: errMsg(e) });
+    }
+  };
+
+  // ---------------- SMTP handlers ----------------
+  const handleTestSmtp = async () => {
+    setSmtpTestStatus({ phase: 'running', message: `Test de connexion SMTP vers ${smtpHost}:${smtpPort}...` });
+    try {
+      const res = await smtpTestConnection(buildSmtpConfig());
+      setSmtpTestStatus({
+        phase: 'success',
+        message: res.message,
+        detail: res.serverGreeting ? `Réponse serveur : ${res.serverGreeting}` : undefined,
+      });
+    } catch (e) {
+      setSmtpTestStatus({ phase: 'error', message: 'Test de connexion SMTP échoué', detail: errMsg(e) });
+    }
+  };
+
+  const handleSendSmtp = async () => {
+    setSmtpSendStatus({ phase: 'running', message: `Envoi du message de test à ${testRecipient}...` });
+    try {
+      const res = await smtpSendTest(buildSmtpConfig());
+      setSmtpSendStatus({ phase: 'success', message: res.message });
+    } catch (e) {
+      setSmtpSendStatus({ phase: 'error', message: 'Envoi du test échoué', detail: errMsg(e) });
+    }
+  };
+
+  // ---------------- profils ----------------
+  const reloadSshProfiles = useCallback(async () => {
+    try {
+      setSshProfiles(await sshListProfiles());
+    } catch {
+      setSshProfiles([]);
+    }
+  }, []);
+
+  const reloadSmtpProfiles = useCallback(async () => {
+    try {
+      setSmtpProfiles(await smtpListProfiles());
+    } catch {
+      setSmtpProfiles([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      reloadSshProfiles();
+      reloadSmtpProfiles();
+    }
+  }, [isOpen, reloadSshProfiles, reloadSmtpProfiles]);
+
+  const applySshProfile = (p: SshProfile) => {
+    setSshHost(p.host);
+    setSshPort(String(p.port));
+    setSshUser(p.user);
+    setSshAuthType(p.authType);
+    setSshKeyPath(p.keyPath || '');
+    setSshKeepAlive(String(p.keepAlive));
+    setSshPortForwarding(p.portForwarding || '');
+    setSshPassword('');
+  };
+
+  const saveSshProfile = async () => {
+    if (!sshProfileName.trim()) return;
+    try {
+      const cfg = buildSshConfig();
+      await sshSaveProfile({
+        id: '',
+        name: sshProfileName.trim(),
+        host: cfg.host,
+        port: cfg.port,
+        user: cfg.user,
+        authType: cfg.authType,
+        keyPath: cfg.keyPath,
+        keepAlive: cfg.keepAlive,
+        portForwarding: cfg.portForwarding,
+        updatedAt: '',
+      });
+      setSshProfileName('');
+      await reloadSshProfiles();
+    } catch (e) {
+      setSshStatus({ phase: 'error', message: 'Sauvegarde du profil SSH échouée', detail: errMsg(e) });
+    }
+  };
+
+  const applySmtpProfile = (p: SmtpProfile) => {
+    setSmtpHost(p.host);
+    setSmtpPort(String(p.port));
+    setSmtpSecurity(p.security);
+    setSmtpUser(p.user || '');
+    setSmtpSender(p.fromAddress);
+    setSmtpSenderName(p.fromName || '');
+    setSmtpPassword('');
+  };
+
+  const saveSmtpProfile = async () => {
+    if (!smtpProfileName.trim()) return;
+    try {
+      const cfg = buildSmtpConfig();
+      await smtpSaveProfile({
+        id: '',
+        name: smtpProfileName.trim(),
+        host: cfg.host,
+        port: cfg.port,
+        security: cfg.security,
+        user: cfg.user,
+        fromAddress: cfg.fromAddress,
+        fromName: cfg.fromName,
+        updatedAt: '',
+      });
+      setSmtpProfileName('');
+      await reloadSmtpProfiles();
+    } catch (e) {
+      setSmtpTestStatus({ phase: 'error', message: 'Sauvegarde du profil SMTP échouée', detail: errMsg(e) });
+    }
+  };
+
   if (!isOpen) return null;
 
-  // Generate SSH CLI command
-  const getSshCommand = () => {
-    let cmd = `ssh -p ${sshPort} `;
-    if (sshAuthType === 'key') {
-      cmd += `-i ${sshKeyPath} `;
-    }
-    if (sshPortForwarding.trim()) {
-      cmd += `-L ${sshPortForwarding} `;
-    }
-    cmd += `-o ServerAliveInterval=${sshKeepAlive} ${sshUser}@${sshHost}`;
-    return cmd;
+  const statusBox = (st: Status) => {
+    if (st.phase === 'idle') return null;
+    const isErr = st.phase === 'error';
+    return (
+      <div
+        className={`p-3 rounded-lg border font-mono text-[11px] whitespace-pre-wrap transition ${
+          st.phase === 'running'
+            ? 'bg-zinc-950/40 border-zinc-700 text-zinc-200'
+            : isErr
+            ? 'bg-rose-950/30 border-rose-800/50 text-rose-200'
+            : 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'
+        }`}
+      >
+        <div className="flex items-center gap-2 font-bold mb-1">
+          {st.phase === 'running' ? (
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
+          ) : isErr ? (
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+          ) : (
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          )}
+          {st.message}
+        </div>
+        {st.detail && <span className="text-zinc-400">{st.detail}</span>}
+      </div>
+    );
   };
 
-  // Generate SMTP Swaks / Curl CLI command
-  const getSmtpCommand = () => {
-    const proto = smtpSecurity === 'ssl' ? 'smtps' : 'smtp';
-    let cmd = `curl --url '${proto}://${smtpHost}:${smtpPort}' \\\n`;
-    cmd += `  --mail-from '${smtpSender}' \\\n`;
-    cmd += `  --mail-rcpt '${testRecipient}' \\\n`;
-    if (smtpUser) {
-      cmd += `  --user '${smtpUser}:${smtpPassword ? '******' : 'PASSWORD'}' \\\n`;
-    }
-    if (smtpSecurity === 'starttls') {
-      cmd += `  --ssl-reqd \\\n`;
-    }
-    cmd += `  -T - <<EOF\nFrom: ${smtpSenderName} <${smtpSender}>\nTo: ${testRecipient}\nSubject: Test SMTP OmniLinux\n\nCeci est un message de test SMTP depuis OmniLinux Terminal.\nEOF`;
-    return cmd;
-  };
-
-  const handleConnectSsh = () => {
-    const cmd = getSshCommand();
-    onRunCommand(cmd);
-    setSshConnected(true);
-    setTimeout(() => {
-      onClose();
-    }, 600);
-  };
-
-  const handleTestSmtp = () => {
-    setSmtpTestStatus('testing');
-    setSmtpTestLog('Connexion au serveur SMTP ' + smtpHost + ':' + smtpPort + '...');
-    setTimeout(() => {
-      setSmtpTestStatus('success');
-      setSmtpTestLog(
-        `[220 ${smtpHost} ESMTP] OK\nEHLO omnilinux.local\n250-STARTTLS Supported\n250-AUTH LOGIN PLAIN\n250 OK\nAUTH SUCCESS\n250 2.1.0 Sender <${smtpSender}> OK\n250 2.1.5 Recipient <${testRecipient}> OK\n354 Start mail input; end with <CR><LF>.<CR><LF>\n250 2.0.0 OK: queued as 4Xy9k1202\nTest de connexion SMTP réussi !`
-      );
-    }, 1200);
-  };
-
-  const handleCopyCommand = (text: string, type: 'ssh' | 'smtp') => {
-    navigator.clipboard.writeText(text);
-    if (type === 'ssh') {
-      setSshCopied(true);
-      setTimeout(() => setSshCopied(false), 2000);
-    } else {
-      setSmtpCopied(true);
-      setTimeout(() => setSmtpCopied(false), 2000);
-    }
-  };
+  const renderProfileBar = (
+    name: string,
+    setter: (v: string) => void,
+    onSave: () => void,
+    onApply: (id: string) => void,
+    onDelete: (id: string) => void,
+    list: { id: string; name: string }[]
+  ) => (
+    <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800/60 pt-3">
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setter(e.target.value)}
+        placeholder="Nom du profil"
+        className="flex-1 min-w-[140px] bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-zinc-200 font-mono text-[11px] focus:outline-none focus:border-emerald-500 transition"
+      />
+      <button
+        type="button"
+        onClick={onSave}
+        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium flex items-center gap-1.5 transition"
+      >
+        <Save className="w-3.5 h-3.5" /> Enregistrer
+      </button>
+      {list.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {list.map((p) => (
+            <span
+              key={p.id}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-emerald-300"
+            >
+              <button
+                type="button"
+                onClick={() => onApply(p.id)}
+                className="hover:text-white transition"
+                title="Appliquer"
+              >
+                {p.name}
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(p.id)}
+                className="text-zinc-500 hover:text-rose-400 transition"
+                title="Supprimer"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto animate-fade-in">
@@ -196,7 +427,7 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Configurez vos identifiants distants et gérez vos tunnels sécurisés.
+                Connexions réelles pilotées par le backend Rust — aucun accès simulé.
               </p>
             </div>
           </div>
@@ -237,65 +468,45 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-5 text-xs">
           {activeTab === 'ssh' ? (
-            /* ================= SSH FORM ================= */
             <div className="space-y-4">
-              {/* Presets */}
               <div>
                 <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-2">
                   Profils rapides SSH
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applySshPreset('ubuntu')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">Ubuntu Server</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySshPreset('aws')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">AWS EC2</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySshPreset('debian')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">Debian / VPS</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySshPreset('alpine')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">Alpine / Docker</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400" />
-                  </button>
+                  {(
+                    [
+                      ['ubuntu', 'Ubuntu Server'],
+                      ['aws', 'AWS EC2'],
+                      ['debian', 'Debian / VPS'],
+                      ['alpine', 'Alpine / Docker'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => applySshPreset(key)}
+                      className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
+                    >
+                      <span className="font-mono text-zinc-200 font-medium">{label}</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400" />
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Host & Port */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block text-zinc-300 font-medium mb-1">
                     Hôte ou IP du serveur <span className="text-rose-400">*</span>
                   </label>
-                  <div className="relative">
-                    <Globe className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={sshHost}
-                      onChange={(e) => setSshHost(e.target.value)}
-                      placeholder="e.g. 192.168.1.100 or ssh.domain.com"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={sshHost}
+                    onChange={(e) => setSshHost(e.target.value)}
+                    placeholder="e.g. 192.168.1.100 or ssh.domain.com"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                  />
                 </div>
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1">Port SSH</label>
@@ -309,24 +520,19 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </div>
               </div>
 
-              {/* User & Auth Type */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1">
                     Nom d'utilisateur <span className="text-rose-400">*</span>
                   </label>
-                  <div className="relative">
-                    <User className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={sshUser}
-                      onChange={(e) => setSshUser(e.target.value)}
-                      placeholder="e.g. root, ubuntu, admin"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={sshUser}
+                    onChange={(e) => setSshUser(e.target.value)}
+                    placeholder="e.g. root, ubuntu, admin"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                  />
                 </div>
-
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1">Authentification</label>
                   <div className="flex rounded-lg border border-zinc-800 p-0.5 bg-zinc-950">
@@ -356,40 +562,30 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </div>
               </div>
 
-              {/* Password or Key Path */}
               {sshAuthType === 'key' ? (
                 <div>
-                  <label className="block text-zinc-300 font-medium mb-1">
-                    Chemin de la clé privée SSH
-                  </label>
-                  <div className="relative">
-                    <FolderKey className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={sshKeyPath}
-                      onChange={(e) => setSshKeyPath(e.target.value)}
-                      placeholder="e.g. ~/.ssh/id_rsa or /home/user/.ssh/id_ed25519"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
+                  <label className="block text-zinc-300 font-medium mb-1">Chemin de la clé privée SSH</label>
+                  <input
+                    type="text"
+                    value={sshKeyPath}
+                    onChange={(e) => setSshKeyPath(e.target.value)}
+                    placeholder="e.g. ~/.ssh/id_rsa or /home/user/.ssh/id_ed25519"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                  />
                 </div>
               ) : (
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1">Mot de passe SSH</label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-2.5" />
-                    <input
-                      type="password"
-                      value={sshPassword}
-                      onChange={(e) => setSshPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
-                    />
-                  </div>
+                  <input
+                    type="password"
+                    value={sshPassword}
+                    onChange={(e) => setSshPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-emerald-500 transition"
+                  />
                 </div>
               )}
 
-              {/* Advanced Options */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-zinc-800/60">
                 <div>
                   <label className="block text-zinc-400 text-[11px] mb-1">
@@ -404,9 +600,7 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-400 text-[11px] mb-1">
-                    Intervalle Keep-Alive (s)
-                  </label>
+                  <label className="block text-zinc-400 text-[11px] mb-1">Intervalle Keep-Alive (s)</label>
                   <input
                     type="text"
                     value={sshKeepAlive}
@@ -417,100 +611,96 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </div>
               </div>
 
-              {/* Generated Command Box */}
-              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                  <span className="flex items-center gap-1.5">
-                    <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                    Commande SSH générée
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCommand(getSshCommand(), 'ssh')}
-                    className="text-zinc-400 hover:text-emerald-400 flex items-center gap-1 transition"
-                  >
-                    {sshCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-400" /> Copié !
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> Copier
-                      </>
-                    )}
-                  </button>
+              {statusBox(sshStatus)}
+              {sshConnected && (
+                <div className="flex items-center gap-2 text-emerald-300 font-mono text-[11px]">
+                  <Plug className="w-3.5 h-3.5" /> Session SSH active
                 </div>
-                <div className="font-mono text-xs text-emerald-300 break-all bg-black/40 p-2 rounded border border-zinc-900 select-all">
-                  {getSshCommand()}
-                </div>
-              </div>
+              )}
+              {renderProfileBar(
+                sshProfileName,
+                setSshProfileName,
+                saveSshProfile,
+                (id) => {
+                  const p = sshProfiles.find((x) => x.id === id);
+                  if (p) applySshProfile(p);
+                },
+                async (id) => {
+                  await sshDeleteProfile(id);
+                  await reloadSshProfiles();
+                },
+                sshProfiles
+              )}
 
-              {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={onClose}
                   className="px-4 py-2 rounded-lg border border-zinc-800 text-zinc-300 hover:bg-zinc-800 transition font-medium"
                 >
-                  Annuler
+                  Fermer
                 </button>
                 <button
                   type="button"
-                  onClick={handleConnectSsh}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-2 shadow-lg shadow-emerald-950/50 transition"
+                  onClick={handleTestSsh}
+                  disabled={sshStatus.phase === 'running'}
+                  className="px-4 py-2 rounded-lg border border-emerald-600/50 text-emerald-300 hover:bg-emerald-600/10 transition font-medium flex items-center gap-2"
                 >
-                  <Play className="w-4 h-4 fill-current" />
-                  Lancer la connexion SSH
+                  <Radio className="w-4 h-4" />
+                  Tester la connexion
                 </button>
+                {!sshConnected ? (
+                  <button
+                    type="button"
+                    onClick={handleConnectSsh}
+                    disabled={sshStatus.phase === 'running'}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-2 shadow-lg shadow-emerald-950/50 transition"
+                  >
+                    <Play className="w-4 h-4 fill-current" />
+                    Lancer la connexion SSH
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectSsh}
+                    className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium flex items-center gap-2 shadow-lg shadow-rose-950/50 transition"
+                  >
+                    <X className="w-4 h-4" />
+                    Déconnecter
+                  </button>
+                )}
               </div>
             </div>
           ) : (
-            /* ================= SMTP FORM ================= */
             <div className="space-y-4">
-              {/* Presets */}
               <div>
                 <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block mb-2">
                   Fournisseurs SMTP pré-configurés
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applySmtpPreset('gmail')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">Google Gmail</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-sky-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySmtpPreset('outlook')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">Microsoft 365</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-sky-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySmtpPreset('ovh')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">OVHcloud</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-sky-400" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applySmtpPreset('sendgrid')}
-                    className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
-                  >
-                    <span className="font-mono text-zinc-200 font-medium">SendGrid</span>
-                    <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-sky-400" />
-                  </button>
+                  {(
+                    [
+                      ['gmail', 'Google Gmail'],
+                      ['outlook', 'Microsoft 365'],
+                      ['ovh', 'OVHcloud'],
+                      ['sendgrid', 'SendGrid'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => applySmtpPreset(key)}
+                      className="p-2 rounded-lg border border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800/80 text-left transition flex items-center justify-between group"
+                    >
+                      <span className="font-mono text-zinc-200 font-medium">{label}</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-sky-400" />
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Host, Port & Protocol */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-1">
+                <div>
                   <label className="block text-zinc-300 font-medium mb-1">
                     Serveur SMTP Host <span className="text-rose-400">*</span>
                   </label>
@@ -536,17 +726,16 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                   <label className="block text-zinc-300 font-medium mb-1">Sécurité Chiffrement</label>
                   <select
                     value={smtpSecurity}
-                    onChange={(e) => setSmtpSecurity(e.target.value as any)}
+                    onChange={(e) => setSmtpSecurity(e.target.value as 'startTls' | 'ssl' | 'none')}
                     className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-zinc-100 font-mono text-xs focus:outline-none focus:border-sky-500 transition"
                   >
-                    <option value="starttls">STARTTLS (Port 587)</option>
+                    <option value="startTls">STARTTLS (Port 587)</option>
                     <option value="ssl">SSL / TLS (Port 465)</option>
                     <option value="none">Aucun (Plain Port 25)</option>
                   </select>
                 </div>
               </div>
 
-              {/* User & Password */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-zinc-300 font-medium mb-1">Identifiant / Email</label>
@@ -570,7 +759,6 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </div>
               </div>
 
-              {/* Sender Info & Recipient Test */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-zinc-800/60">
                 <div>
                   <label className="block text-zinc-400 text-[11px] mb-1">Email Expéditeur (From)</label>
@@ -604,58 +792,23 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 </div>
               </div>
 
-              {/* Test Status Log */}
-              {smtpTestStatus !== 'idle' && (
-                <div
-                  className={`p-3 rounded-lg border font-mono text-[11px] whitespace-pre-wrap transition ${
-                    smtpTestStatus === 'testing'
-                      ? 'bg-sky-950/30 border-sky-800/50 text-sky-200'
-                      : smtpTestStatus === 'success'
-                      ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-200'
-                      : 'bg-rose-950/30 border-rose-800/50 text-rose-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 font-bold mb-1">
-                    {smtpTestStatus === 'testing' ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                    ) : (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    )}
-                    Journal de test SMTP :
-                  </div>
-                  {smtpTestLog}
-                </div>
+              {statusBox(smtpTestStatus)}
+              {statusBox(smtpSendStatus)}
+              {renderProfileBar(
+                smtpProfileName,
+                setSmtpProfileName,
+                saveSmtpProfile,
+                (id) => {
+                  const p = smtpProfiles.find((x) => x.id === id);
+                  if (p) applySmtpProfile(p);
+                },
+                async (id) => {
+                  await smtpDeleteProfile(id);
+                  await reloadSmtpProfiles();
+                },
+                smtpProfiles
               )}
 
-              {/* Generated Curl Script */}
-              <div className="bg-zinc-950 border border-zinc-800 rounded-lg p-3 space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
-                  <span className="flex items-center gap-1.5">
-                    <Send className="w-3.5 h-3.5 text-sky-400" />
-                    Commande Linux (Curl / SMTP)
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCommand(getSmtpCommand(), 'smtp')}
-                    className="text-zinc-400 hover:text-sky-400 flex items-center gap-1 transition"
-                  >
-                    {smtpCopied ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-sky-400" /> Copié !
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" /> Copier
-                      </>
-                    )}
-                  </button>
-                </div>
-                <pre className="font-mono text-[11px] text-sky-300 bg-black/40 p-2.5 rounded border border-zinc-900 overflow-x-auto selection:bg-sky-500/30">
-                  {getSmtpCommand()}
-                </pre>
-              </div>
-
-              {/* Action Buttons */}
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -667,10 +820,20 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({
                 <button
                   type="button"
                   onClick={handleTestSmtp}
+                  disabled={smtpTestStatus.phase === 'running'}
+                  className="px-4 py-2 rounded-lg border border-sky-600/50 text-sky-300 hover:bg-sky-600/10 transition font-medium flex items-center gap-2"
+                >
+                  <Wifi className="w-4 h-4" />
+                  Tester la connexion
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendSmtp}
+                  disabled={smtpSendStatus.phase === 'running'}
                   className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium flex items-center gap-2 shadow-lg shadow-sky-950/50 transition"
                 >
                   <Send className="w-4 h-4" />
-                  Tester l'envoi SMTP
+                  Envoyer le test
                 </button>
               </div>
             </div>
