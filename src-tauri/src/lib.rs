@@ -414,6 +414,11 @@ mod tests {
             distro_list,
             system_get_telemetry,
             ai::commands::ai_generate,
+            ai::commands::ai_explain,
+            ai::commands::ai_debug,
+            ai::commands::ai_test,
+            settings::settings_get,
+            settings::settings_update,
             tauri_get_backend_info,
         ]);
         builder

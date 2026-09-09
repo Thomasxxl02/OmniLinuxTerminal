@@ -101,6 +101,7 @@ pub struct AiTestResponse {
     pub engine_model: String,
     pub provider: String,
     pub provider_id: String,
+    #[specta(type = specta_typescript::Number)]
     pub latency_ms: u64,
     pub message: String,
     pub sample_response: String,
