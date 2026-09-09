@@ -9,7 +9,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
+
+/// Nombre maximal de connexions SSH simultanées (limite de ressource réseau).
+const MAX_SSH_CONNECTIONS: usize = 3;
 
 /// Poignée d'une session SSH interactive.
 struct InteractiveHandle {
@@ -28,6 +32,7 @@ pub struct SshManager {
     profile_path: PathBuf,
     known_hosts: Mutex<KnownHostsStore>,
     session: Mutex<Option<InteractiveHandle>>,
+    conn_slots: Arc<Semaphore>,
 }
 
 impl SshManager {
@@ -36,7 +41,13 @@ impl SshManager {
             profile_path: data_dir.join("ssh_profiles.json"),
             known_hosts: Mutex::new(KnownHostsStore::new(data_dir)),
             session: Mutex::new(None),
+            conn_slots: Arc::new(Semaphore::new(MAX_SSH_CONNECTIONS)),
         }
+    }
+
+    /// Retourne le sémaphore limitant les connexions SSH simultanées.
+    pub fn slots(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.conn_slots)
     }
 
     /// Test de connexion : TCP + handshake + auth + vérification TOFU, puis ferme la session.

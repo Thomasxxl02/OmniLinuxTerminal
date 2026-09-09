@@ -1,4 +1,5 @@
 use crate::models::{FileNode, NodeType};
+use crate::storage;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -193,27 +194,35 @@ impl VirtualFileSystem {
     }
 
     /// Sérialise et écrit le VFS sur disque (si un chemin est défini).
+    /// Écriture atomique (temp + fsync + rename) : un plantage ne corrompt pas
+    /// le fichier de données.
     pub fn persist(&self) {
         let path = self.persist_path.lock().unwrap().clone();
         if let Some(p) = path {
             if let Ok(json) = serde_json::to_string_pretty(&self.to_state()) {
-                let _ = std::fs::write(p, json);
+                let _ = storage::atomic_write(std::path::Path::new(&p), json.as_bytes());
             }
         }
     }
 
     /// Charge le VFS depuis `path`. Renvoie `true` si un état valide a été lu.
-    /// Sinon conserve le VFS initial (seed).
+    /// Sinon conserve le VFS initial (seed). Un fichier corrompu ou d'une
+    /// version inconnue est mis en quarantaine (préserve pour diagnostic).
     pub fn load_or_initialize(&self, path: &str) -> bool {
-        if let Ok(json) = std::fs::read_to_string(path) {
-            if let Ok(state) = serde_json::from_str::<VfsState>(&json) {
-                if state.version == VFS_SCHEMA_VERSION {
+        match std::fs::read_to_string(path) {
+            Ok(json) => match serde_json::from_str::<VfsState>(&json) {
+                Ok(state) if state.version == VFS_SCHEMA_VERSION => {
                     self.from_state(state);
-                    return true;
+                    true
                 }
-            }
+                _ => {
+                    // Corrompu ou version inconnue -> quarantaine (préserve le fichier).
+                    let _ = storage::quarantine(std::path::Path::new(path));
+                    false
+                }
+            },
+            Err(_) => false,
         }
-        false
     }
 
     // ==================== LECTURE / ÉCRITURE ====================
@@ -474,6 +483,10 @@ impl VirtualFileSystem {
                 "Version de schéma incompatible: {} (attendu {})",
                 state.version, VFS_SCHEMA_VERSION
             ));
+        }
+        // Sauvegarde de l'état actuel avant import (jamais de perte irréversible).
+        if let Some(p) = self.persist_path.lock().unwrap().clone() {
+            let _ = storage::backup(std::path::Path::new(&p));
         }
         self.from_state(state);
         self.persist();

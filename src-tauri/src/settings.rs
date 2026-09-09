@@ -1,4 +1,5 @@
 use crate::models::AppError;
+use crate::storage;
 use serde_json::{Map, Value};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -6,11 +7,17 @@ use tauri::State;
 
 // ===========================================================================
 // Store des réglages (source de vérité Rust).
-// Persisté en JSON sous `app_data_dir/settings.json`. Map générique clé/valeur
-// pour rester flexible (themeId, crtEffect, soundEnabled, soundStyle,
-// fontSize, aiConfig…). Les secrets ne passent JAMAIS par ce store :
-// le frontend ne persiste que des valeurs non sensibles.
+// Persisté en JSON sous `app_data_dir/settings.json` sous forme versionnée
+// `{ "version": 1, "data": { ... } }`. Map générique clé/valeur pour rester
+// flexible (themeId, crtEffect, soundEnabled, soundStyle, fontSize,
+// aiConfig…). Les secrets ne passent JAMAIS par ce store : le frontend ne
+// persiste que des valeurs non sensibles.
+// Écriture atomique (temp + fsync + rename) + récupération sur corruption.
 // ===========================================================================
+
+/// Version du format de persistance des réglages. À incrémenter à chaque
+/// migration (voir `load`).
+const SETTINGS_VERSION: u32 = 1;
 
 pub struct SettingsStore {
     path: PathBuf,
@@ -23,12 +30,27 @@ impl SettingsStore {
         Self { path, data }
     }
 
+    /// Charge la map des réglages. Gère le format versionné, migre l'ancien
+    /// format (map racine) et met en quarantaine un fichier corrompu.
     fn load(path: &PathBuf) -> Map<String, Value> {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-            .and_then(|v| v.as_object().cloned())
-            .unwrap_or_default()
+        match std::fs::read_to_string(path) {
+            Ok(s) if !s.trim().is_empty() => match serde_json::from_str::<Value>(&s) {
+                Ok(v) => {
+                    // Format versionné (v1+) : { "version": N, "data": {...} }
+                    if let Some(data) = v.get("data").and_then(|d| d.as_object()) {
+                        return data.clone();
+                    }
+                    // Legacy : la racine était directement la map des réglages.
+                    v.as_object().cloned().unwrap_or_default()
+                }
+                Err(_) => {
+                    // Fichier corrompu -> quarantaine (préserve pour diagnostic).
+                    let _ = storage::quarantine(path);
+                    Map::new()
+                }
+            },
+            _ => Map::new(),
+        }
     }
 
     pub fn all(&self) -> Map<String, Value> {
@@ -41,9 +63,13 @@ impl SettingsStore {
     }
 
     fn persist(&self) -> Result<(), AppError> {
-        let json = serde_json::to_string_pretty(&Value::Object(self.data.clone()))
+        let mut env = Map::new();
+        env.insert("version".to_string(), Value::from(SETTINGS_VERSION));
+        env.insert("data".to_string(), Value::Object(self.data.clone()));
+        let json = serde_json::to_string_pretty(&Value::Object(env))
             .map_err(|e| AppError::new("settings_io", format!("{e}")))?;
-        std::fs::write(&self.path, json).map_err(|e| AppError::new("settings_io", format!("{e}")))
+        storage::atomic_write(&self.path, json.as_bytes())
+            .map_err(|e| AppError::new("settings_io", format!("{e}")))
     }
 }
 

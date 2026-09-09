@@ -1,6 +1,7 @@
 use crate::models::AppError;
 use serde_json::{json, Value};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 // ===========================================================================
 // Couche providers IA (source de vérité Rust).
@@ -392,7 +393,16 @@ pub struct GenerateOpts<'a> {
 }
 
 /// Dispatch générique selon le provider résolu (miroir de generateText de server.ts).
+/// Délai maximal pour une requête IA (résolution + génération HTTP).
+const AI_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub async fn generate_text(resolved: &ResolvedModel, opts: &GenerateOpts<'_>) -> Result<String, AppError> {
+    tokio::time::timeout(AI_TIMEOUT, generate_text_inner(resolved, opts))
+        .await
+        .map_err(|_| AppError::new("ai_timeout", "Requête IA : délai dépassé (60s)"))?
+}
+
+async fn generate_text_inner(resolved: &ResolvedModel, opts: &GenerateOpts<'_>) -> Result<String, AppError> {
     let temp = opts.temperature.unwrap_or(0.2);
 
     if resolved.provider_id == "custom" {

@@ -5,11 +5,16 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 /// Timeout réseau SMTP par défaut.
 const SMTP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Nombre maximal d'opérations SMTP (test/envoi) simultanées.
+const MAX_SMTP_CONNECTIONS: usize = 3;
 
 /// Validation structurée de la configuration SMTP.
 pub fn validate(config: &SmtpConfig) -> Result<(), AppError> {
@@ -118,13 +123,20 @@ pub fn send_test(config: &SmtpConfig) -> Result<SmtpSendResult, AppError> {
 /// Gestionnaire des profils SMTP (non sensibles) et du test/envoi.
 pub struct SmtpManager {
     profile_path: PathBuf,
+    conn_slots: Arc<Semaphore>,
 }
 
 impl SmtpManager {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             profile_path: data_dir.join("smtp_profiles.json"),
+            conn_slots: Arc::new(Semaphore::new(MAX_SMTP_CONNECTIONS)),
         }
+    }
+
+    /// Retourne le sémaphore limitant les opérations SMTP simultanées.
+    pub fn slots(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.conn_slots)
     }
 
     pub fn test_connection(&self, config: &SmtpConfig) -> Result<SmtpTestResult, AppError> {

@@ -1,12 +1,14 @@
 pub mod ai;
 pub mod distro;
 pub mod fs;
+pub mod history;
 pub mod models;
 pub mod security;
 pub mod settings;
 pub mod session;
 pub mod smtp;
 pub mod ssh;
+pub mod storage;
 pub mod system;
 pub mod terminal;
 
@@ -16,7 +18,7 @@ use models::{
     AppError, CommandResult, DistroInfo, FileNode,
     ProcessItem, RiskReport, SystemTelemetry, TauriBackendInfo,
 };
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use system::SystemMonitor;
 use tauri::{Manager, State};
 use terminal::ShellExecutor;
@@ -36,12 +38,13 @@ pub struct AppState {
 #[tauri::command]
 #[specta::specta]
 fn terminal_execute(
-    state: State<'_, Mutex<AppState>>,
+    state: State<'_, AppState>,
+    history: State<'_, Mutex<history::HistoryStore>>,
     cmd: String,
     cwd: String,
     distro_id: String,
 ) -> CommandResult {
-    let app_state = state.lock().unwrap();
+    let app_state = state;
     // Garde-fou sécurité (défense en profondeur) : toute commande classée
     // critique est bloquée côté backend, indépendamment de la confirmation frontend.
     let report = security::risk::analyze(&cmd);
@@ -58,7 +61,10 @@ fn terminal_execute(
             effects: Vec::new(),
         };
     }
-    app_state.executor.execute(&cmd, &cwd, &distro_id, &[])
+    let res = app_state.executor.execute(&cmd, &cwd, &distro_id, &[]);
+    // Historique local (JSONL, source de vérité Rust) : on trace la commande exécutée.
+    let _ = history.lock().unwrap().add(&cmd, &distro_id, &cwd, res.exit_code);
+    res
 }
 
 #[tauri::command]
@@ -107,109 +113,110 @@ fn terminal_help() -> String {
 
 #[tauri::command]
 #[specta::specta]
-fn terminal_get_history() -> Vec<String> {
-    Vec::new() // Phase 7 : persistance de l'historique des commandes
+fn terminal_get_history(history: State<'_, Mutex<history::HistoryStore>>) -> Vec<String> {
+    // Historique local (JSONL) : les commandes exécutées, les plus récentes d'abord.
+    history.lock().unwrap().list(200).into_iter().map(|e| e.cmd).collect()
 }
 
 // ------------------ FICHIERS (VFS) ------------------
 
 #[tauri::command]
 #[specta::specta]
-fn fs_read(state: State<'_, Mutex<AppState>>, path: String) -> Result<String, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_read(state: State<'_, AppState>, path: String) -> Result<String, AppError> {
+    let app_state = state;
     app_state.vfs.read_file(&path).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn fs_write(
-    state: State<'_, Mutex<AppState>>,
+    state: State<'_, AppState>,
     path: String,
     content: String,
     append: bool,
 ) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+    let app_state = state;
     app_state.vfs.write_file(&path, &content, append).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_list(state: State<'_, Mutex<AppState>>, path: String) -> Vec<FileNode> {
-    let app_state = state.lock().unwrap();
+fn fs_list(state: State<'_, AppState>, path: String) -> Vec<FileNode> {
+    let app_state = state;
     app_state.vfs.list_dir(&path)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_create_dir(state: State<'_, Mutex<AppState>>, path: String) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_create_dir(state: State<'_, AppState>, path: String) -> Result<FileNode, AppError> {
+    let app_state = state;
     app_state.vfs.create_dir(&path).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_remove(state: State<'_, Mutex<AppState>>, path: String, recursive: bool) -> Result<(), AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_remove(state: State<'_, AppState>, path: String, recursive: bool) -> Result<(), AppError> {
+    let app_state = state;
     app_state.vfs.remove_path(&path, recursive).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_copy(state: State<'_, Mutex<AppState>>, src: String, dst: String) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_copy(state: State<'_, AppState>, src: String, dst: String) -> Result<FileNode, AppError> {
+    let app_state = state;
     app_state.vfs.copy(&src, &dst).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_move(state: State<'_, Mutex<AppState>>, src: String, dst: String) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_move(state: State<'_, AppState>, src: String, dst: String) -> Result<FileNode, AppError> {
+    let app_state = state;
     app_state.vfs.move_path(&src, &dst).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_search(state: State<'_, Mutex<AppState>>, query: String) -> Vec<String> {
-    let app_state = state.lock().unwrap();
+fn fs_search(state: State<'_, AppState>, query: String) -> Vec<String> {
+    let app_state = state;
     app_state.vfs.search(&query)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_chmod(state: State<'_, Mutex<AppState>>, path: String, permissions: String) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_chmod(state: State<'_, AppState>, path: String, permissions: String) -> Result<FileNode, AppError> {
+    let app_state = state;
     app_state.vfs.chmod(&path, &permissions).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_reset(state: State<'_, Mutex<AppState>>) {
-    let app_state = state.lock().unwrap();
+fn fs_reset(state: State<'_, AppState>) {
+    let app_state = state;
     app_state.vfs.reset();
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_export(state: State<'_, Mutex<AppState>>) -> Result<String, AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_export(state: State<'_, AppState>) -> Result<String, AppError> {
+    let app_state = state;
     app_state.vfs.export_json().map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn fs_import(state: State<'_, Mutex<AppState>>, json: String) -> Result<(), AppError> {
-    let app_state = state.lock().unwrap();
+fn fs_import(state: State<'_, AppState>, json: String) -> Result<(), AppError> {
+    let app_state = state;
     app_state.vfs.import_json(&json).map_err(AppError::from)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn fs_update_os_release(
-    state: State<'_, Mutex<AppState>>,
+    state: State<'_, AppState>,
     name: String,
     version: String,
 ) -> Result<FileNode, AppError> {
-    let app_state = state.lock().unwrap();
+    let app_state = state;
     app_state
         .vfs
         .update_os_release(&name, &version)
@@ -226,8 +233,8 @@ fn distro_list() -> Vec<DistroInfo> {
 
 #[tauri::command]
 #[specta::specta]
-fn distro_get_current(state: State<'_, Mutex<AppState>>) -> String {
-    let app_state = state.lock().unwrap();
+fn distro_get_current(state: State<'_, AppState>) -> String {
+    let app_state = state;
     // Le VFS Rust ne stocke pas encore la distro active : défaut Ubuntu.
     let _ = &app_state;
     "ubuntu".to_string()
@@ -256,8 +263,8 @@ fn system_list_processes() -> Vec<ProcessItem> {
 
 #[tauri::command]
 #[specta::specta]
-fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo {
-    let app_state = state.lock().unwrap();
+fn tauri_get_backend_info(state: State<'_, AppState>) -> TauriBackendInfo {
+    let app_state = state;
     TauriBackendInfo {
         tauri_version: "2.0.0".to_string(),
         rustc_version: "1.85.0".to_string(),
@@ -280,12 +287,12 @@ fn tauri_get_backend_info(state: State<'_, Mutex<AppState>>) -> TauriBackendInfo
 #[tauri::command]
 #[specta::specta]
 fn execute_shell_command(
-    state: State<'_, Mutex<AppState>>,
+    state: State<'_, AppState>,
     cmd: String,
     cwd: String,
     distro_id: String,
 ) -> CommandResult {
-    let app_state = state.lock().unwrap();
+    let app_state = state;
     app_state.executor.execute(&cmd, &cwd, &distro_id, &[])
 }
 
@@ -341,6 +348,9 @@ pub fn run() {
         session::session_save,
         session::session_export,
         session::session_import,
+        history::history_add,
+        history::history_list,
+        history::history_clear,
         ai::commands::ai_generate,
         ai::commands::ai_explain,
         ai::commands::ai_debug,
@@ -391,11 +401,12 @@ pub fn run() {
             vfs.load_or_initialize(&persist.to_string_lossy());
 
             let executor = ShellExecutor::new(vfs.clone());
-            app.manage(Mutex::new(AppState { vfs, executor }));
-            app.manage(ssh::manager::SshManager::new(&data_dir));
-            app.manage(smtp::service::SmtpManager::new(&data_dir));
+            app.manage(AppState { vfs, executor });
+            app.manage(Arc::new(ssh::manager::SshManager::new(&data_dir)));
+            app.manage(Arc::new(smtp::service::SmtpManager::new(&data_dir)));
             app.manage(Mutex::new(settings::SettingsStore::new(data_dir.join("settings.json"))));
             app.manage(Mutex::new(session::SessionStore::new(data_dir.join("session.json"))));
+            app.manage(Mutex::new(history::HistoryStore::new(&data_dir)));
 
             Ok(())
         })
@@ -432,6 +443,9 @@ mod tests {
             session::session_save,
             session::session_export,
             session::session_import,
+            history::history_add,
+            history::history_list,
+            history::history_clear,
             tauri_get_backend_info,
         ]);
         builder

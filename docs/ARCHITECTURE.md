@@ -154,4 +154,25 @@ Plus de serveur HTTP exposé : les opérations réseau/IA passent par IPC Tauri 
   `webkit2gtk 2.0.2`, `soup3 0.5`) ; `tauri 2.11.5` / `wry 0.55.1` imposent `gtk ^0.18`.
   Un bump de `glib` seul échoue en résolution : `failed to select a version for requirement glib = "^0.18"`.
 - **Impact** : chemin de code interne des binding GTK,**non atteint** par un terminal + webview ;
-  risque d'exploitation quasi nul. Le correctif arrivera avec la migration `tauri`/`wry` vers gtk-rs 0.20.
+ risque d'exploitation quasi nul. Le correctif arrivera avec la migration `tauri`/`wry` vers gtk-rs 0.20.
+
+ ---
+
+ ## 8. Optimisation backend Rust (Priorité 4)
+
+ - **Moins de contention** : l'ancien `Mutex<AppState>` global (qui bloquait le VFS pendant une
+ commande terminal lente) est retiré — `AppState { vfs, executor }` est géré directement, le VFS
+ étant auto-synchronisé en interne (`Arc<Mutex<HashMap>>`). SSH/SMTP restent des états séparés.
+ - **Commandes réseau asynchrones** : `ssh_connect`/`ssh_test_connection`/`smtp_test_connection`/
+ `smtp_send_test` sont désormais `async`, déportées sur `tokio::task::spawn_blocking` (le réseau
+ ssh2/lettre est bloquant) et bornées par `tokio::time::timeout` (20s) ; limite de connexions
+ simultanées via `tokio::sync::Semaphore` (3 par service). L'IA avait déjà un timeout (60s).
+ - **Persistance robuste** : écriture atomique (temp + fsync + rename) pour le VFS, les réglages et
+ les sessions ; enveloppes versionnées `{ version, data }` (settings/session) ; quarantaine d'un
+ fichier corrompu (`.corrupt-<ts>`) ; sauvegarde (`.bak-<ts>`) avant import VFS/session.
+ - **Historique de commandes** : store JSONL `history.jsonl` (une entrée JSON par ligne, append
+ non destructif) — commandes `history_add/list/clear`, branché sur `terminal_execute` et
+ `terminal_get_history`. Léger, sans dépendance lourde.
+ - **Réduction des dépendances** : `tokio` passé de `full` à `["rt","time","sync","macros"]` ;
+ `reqwest` passé de `default-tls` (OpenSSL) à `default-features=false, features=["json","rustls-tls"]`
+ (rustls). OpenSSL/native-tls retirés de l'arbre de dépendances ; `Cargo.lock` allégé.
