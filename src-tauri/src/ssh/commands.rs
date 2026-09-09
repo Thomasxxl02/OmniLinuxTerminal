@@ -2,7 +2,7 @@ use crate::models::AppError;
 use crate::ssh::manager::SshManager;
 use crate::ssh::models::{SshConfig, SshConnectionInfo, SshProfile};
 use crate::ssh::service;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 #[tauri::command]
 #[specta::specta]
@@ -12,17 +12,30 @@ pub fn ssh_validate_config(config: SshConfig) -> Result<(), AppError> {
 
 #[tauri::command]
 #[specta::specta]
-pub fn ssh_test_connection(config: SshConfig) -> Result<SshConnectionInfo, AppError> {
-    service::test_connection(&config)
+pub fn ssh_test_connection(
+    manager: State<'_, SshManager>,
+    config: SshConfig,
+) -> Result<SshConnectionInfo, AppError> {
+    manager.test_connection(&config)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn ssh_connect(
+    app: AppHandle,
     manager: State<'_, SshManager>,
     config: SshConfig,
 ) -> Result<SshConnectionInfo, AppError> {
-    manager.connect(&config)
+    manager.connect(&config, app)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn ssh_session_write(
+    manager: State<'_, SshManager>,
+    data: Vec<u8>,
+) -> Result<(), AppError> {
+    manager.session_write(data)
 }
 
 #[tauri::command]

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle, AiConfig } from './types';
 import { LINUX_DISTROS, DEFAULT_DISTRO } from './data/distros';
 import { TERMINAL_THEMES, DEFAULT_THEME } from './data/themes';
 import { MenuBar } from './components/MenuBar';
 import { TerminalHeader } from './components/TerminalHeader';
-import { TerminalView } from './components/TerminalView';
+import { TerminalView, SshSessionState } from './components/TerminalView';
+import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionInfo } from './lib/sshApi';
 import { NanoEditor } from './components/NanoEditor';
 import { VimEditor } from './components/VimEditor';
 import { HtopMonitor } from './components/HtopMonitor';
@@ -71,6 +72,28 @@ export default function App() {
   const [aboutModalOpen, setAboutModalOpen] = useState<boolean>(false);
   const [tauriModalOpen, setTauriModalOpen] = useState<boolean>(false);
   const [sshSmtpModalOpen, setSshSmtpModalOpen] = useState<boolean>(false);
+
+  // ------ Session SSH interactive (état + stream de sortie) ------
+  const [sshSession, setSshSession] = useState<SshSessionState | null>(null);
+  const sshOutBuf = useRef('');
+  useEffect(() => {
+    const un = sshListenSessionOutput((text) => {
+      sshOutBuf.current += text;
+      setSshSession((prev) => (prev ? { ...prev, output: prev.output + text } : prev));
+    });
+    return un;
+  }, []);
+
+  const handleSshConnected = (info: SshConnectionInfo) => {
+    setSshSession({ connected: true, host: info.host, user: info.user, output: sshOutBuf.current });
+  };
+  const handleSshKey = (bytes: number[]) => {
+    sshSessionWrite(new Uint8Array(bytes)).catch(() => {});
+  };
+  const handleSshDisconnect = () => {
+    sshDisconnect().catch(() => {});
+    setSshSession(null);
+  };
 
   // Gemini AI Model & API Key Configuration State
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => {
@@ -586,6 +609,9 @@ export default function App() {
               soundEnabled={soundEnabled}
               soundStyle={soundStyle}
               onUpdateTab={handleUpdateTab}
+              sshSession={sshSession}
+              onSshKey={handleSshKey}
+              onSshDisconnect={handleSshDisconnect}
             />
           )}
 
@@ -657,6 +683,7 @@ export default function App() {
         <SshSmtpModal
           isOpen={sshSmtpModalOpen}
           onClose={() => setSshSmtpModalOpen(false)}
+          onSshConnected={handleSshConnected}
         />
       )}
     </div>

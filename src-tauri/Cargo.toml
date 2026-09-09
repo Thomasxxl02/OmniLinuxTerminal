@@ -31,3 +31,4 @@ tauri-specta = { version = "2.0.0-rc.25", features = ["typescript"] }
 # Réseau : client SSH réel (libssh2) et SMTP (lettre, TLS rustls)
 ssh2 = "0.9"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "hostname", "rustls-tls"] }
+sha2 = "0.10"

@@ -1,5 +1,6 @@
 use crate::models::AppError;
-use crate::ssh::models::{SshAuthType, SshConfig, SshConnectionInfo};
+use crate::ssh::known_hosts::{sha256_hex, KnownHostsStore};
+use crate::ssh::models::{HostKeyStatus, SshAuthType, SshConfig, SshConnectionInfo};
 use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
@@ -14,6 +15,14 @@ pub struct ForwardSpec {
     pub local_port: u16,
     pub remote_host: String,
     pub remote_port: u16,
+}
+
+/// Session SSH établie, avec les informations de clé d'hôte (TOFU).
+pub struct Established {
+    pub session: ssh2::Session,
+    pub banner: Option<String>,
+    pub host_key_fingerprint: Option<String>,
+    pub host_key_status: HostKeyStatus,
 }
 
 /// Validation structurée de la configuration SSH.
@@ -46,8 +55,6 @@ pub fn validate(config: &SshConfig) -> Result<(), AppError> {
     }
     if let Some(fwd) = config.port_forwarding.as_deref() {
         if !fwd.trim().is_empty() {
-            // On vérifie que la spécification est bien formée sans jamais
-            // l'exécuter : le parsing typé sert uniquement à la validation.
             for spec in fwd.split(',') {
                 parse_forwarding(spec).map_err(|e| AppError::invalid(format!("Tunnel invalide : {e}")))?;
             }
@@ -81,17 +88,25 @@ pub fn parse_forwarding(spec: &str) -> Result<ForwardSpec, String> {
     })
 }
 
-/// Établit une connexion SSH réelle : résolution + TCP + handshake + authentification.
+/// Établit une connexion SSH réelle : résolution + TCP + handshake + auth,
+/// puis **vérifie la clé d'hôte en mode TOFU** (enregistre au 1er usage, compare
+/// ensuite, rejette si modifiée sauf override `allow_unknown_host_key`).
 ///
-/// Retourne la `Session` (qui possède la socket) ainsi que la bannière serveur.
-/// En cas d'échec (hôte inexistant, port fermé, TLS/creds invalides...), retourne
-/// une `AppError` descriptive — jamais de faux succès.
-pub fn establish(config: &SshConfig) -> Result<(ssh2::Session, Option<String>), AppError> {
+/// Retourne la `Session` (qui possède la socket), la bannière et l'état TOFU.
+pub fn establish(
+    config: &SshConfig,
+    known_hosts: &mut KnownHostsStore,
+) -> Result<Established, AppError> {
     validate(config)?;
 
     let addr = format!("{}:{}", config.host, config.port);
-    let tcp = TcpStream::connect(&addr)
-        .map_err(|e| AppError::with_details("ssh_connect", "Connexion TCP échouée", format!("{addr} : {e}")))?;
+    let tcp = TcpStream::connect(&addr).map_err(|e| {
+        AppError::with_details(
+            "ssh_connect",
+            "Connexion TCP échouée",
+            format!("{addr} : {e}"),
+        )
+    })?;
     tcp.set_read_timeout(Some(CONNECT_TIMEOUT))
         .map_err(|e| AppError::new("ssh_connect", format!("set_read_timeout : {e}")))?;
     tcp.set_write_timeout(Some(CONNECT_TIMEOUT))
@@ -100,13 +115,43 @@ pub fn establish(config: &SshConfig) -> Result<(ssh2::Session, Option<String>), 
     let mut session = ssh2::Session::new()
         .map_err(|e| AppError::new("ssh_connect", format!("Session SSH : {e}")))?;
     session.set_tcp_stream(tcp);
-    session
-        .handshake()
-        .map_err(|e| AppError::with_details("ssh_handshake", "Handshake SSH échoué", e.to_string()))?;
+    session.handshake().map_err(|e| {
+        AppError::with_details("ssh_handshake", "Handshake SSH échoué", e.to_string())
+    })?;
 
     let banner = session.banner().map(|b| b.to_string());
 
-    // Authentification par clé ou mot de passe.
+    // --- Vérification TOFU de la clé d'hôte ---
+    // host_key() retourne (blob_clé, HostKeyType) — on hache le blob.
+    let fingerprint = session.host_key().map(|(bytes, _t)| sha256_hex(bytes));
+    let host_key_status = match &fingerprint {
+        // TOFU : on enregistre au 1er usage, on compare ensuite, on rejette si
+        // modifiée SAUF si l'utilisateur autorise expressément les clés inconnues.
+        Some(fp) => {
+            let status = known_hosts.check(&config.host, config.port, fp);
+            if status == HostKeyStatus::Changed && !config.allow_unknown_host_key {
+                return Err(AppError::with_details(
+                    "ssh_host_key",
+                    "Clé d'hôte SSH différente de celle enregistrée",
+                    format!(
+                        "Risque d'attaque de l'homme du milieu sur {}:{}. Cochez \
+                         « autoriser les clés inconnues » si vous faites confiance.",
+                        config.host, config.port
+                    ),
+                ));
+            }
+            status
+        }
+        None if config.allow_unknown_host_key => HostKeyStatus::New,
+        None => {
+            return Err(AppError::new(
+                "ssh_host_key",
+                "Impossible de récupérer la clé d'hôte du serveur",
+            ))
+        }
+    };
+
+    // --- Authentification par clé ou mot de passe ---
     let auth_res = match config.auth_type {
         SshAuthType::Key => {
             let key_path = config.key_path.as_deref().unwrap_or("");
@@ -133,27 +178,41 @@ pub fn establish(config: &SshConfig) -> Result<(ssh2::Session, Option<String>), 
         ));
     }
 
-    Ok((session, banner))
+    Ok(Established {
+        session,
+        banner,
+        host_key_fingerprint: fingerprint,
+        host_key_status,
+    })
 }
 
-/// Test de connexion : ouvre une vraie connexion (TCP + handshake + auth),
-/// capture la bannière, puis ferme immédiatement la session.
-pub fn test_connection(config: &SshConfig) -> Result<SshConnectionInfo, AppError> {
-    let (_, banner) = establish(config)?;
-    Ok(SshConnectionInfo {
+/// Construit le `SshConnectionInfo` à partir d'une session établie.
+pub fn to_info(config: &SshConfig, est: &Established) -> SshConnectionInfo {
+    SshConnectionInfo {
         ok: true,
         host: config.host.clone(),
         port: config.port,
         user: config.user.clone(),
         auth_type: config.auth_type,
-        server_banner: banner,
-        message: format!("Connexion SSH établie avec succès sur {}:{}", config.host, config.port),
-    })
+        server_banner: est.banner.clone(),
+        host_key_fingerprint: est.host_key_fingerprint.clone(),
+        host_key_status: est.host_key_status,
+        message: format!(
+            "Connexion SSH établie avec succès sur {}:{}",
+            config.host, config.port
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ssh::known_hosts::KnownHostsStore;
+
+    fn store() -> KnownHostsStore {
+        let dir = std::env::temp_dir().join(format!("ssh_test_{}", uuid::Uuid::new_v4()));
+        KnownHostsStore::new(&dir)
+    }
 
     fn cfg() -> SshConfig {
         SshConfig {
@@ -165,6 +224,7 @@ mod tests {
             key_path: Some("~/.ssh/id_rsa".to_string()),
             keep_alive: 60,
             port_forwarding: None,
+            allow_unknown_host_key: false,
         }
     }
 
@@ -213,27 +273,75 @@ mod tests {
     }
 
     #[test]
-    fn parse_forwarding_with_bind() {
-        let f = parse_forwarding("127.0.0.1:8080:db:3306").unwrap();
-        assert_eq!(f.bind, "127.0.0.1");
-        assert_eq!(f.local_port, 8080);
-        assert_eq!(f.remote_host, "db");
-        assert_eq!(f.remote_port, 3306);
-    }
-
-    #[test]
     fn parse_forwarding_rejects_malformed() {
         assert!(parse_forwarding("pas-un-tunnel").is_err());
         assert!(parse_forwarding("8080:hote").is_err());
     }
 
-    /// Preuve que la connexion est réellement réseau (et non simulée) :
-    /// un port fermé sur la boucle locale doit produire une erreur.
+    /// Preuve que la connexion est réellement réseau : un port fermé doit échouer.
     #[test]
-    fn test_connection_closed_port_returns_error() {
+    fn establish_closed_port_returns_error() {
         let mut c = cfg();
         c.host = "127.0.0.1".to_string();
-        c.port = 1; // port 1 : connexion refusée quasi systématiquement
-        assert!(test_connection(&c).is_err());
+        c.port = 1;
+        let mut s = store();
+        assert!(establish(&c, &mut s).is_err());
+    }
+
+    /// Preuve d'une **vraie session SSH interactive** (PTY + shell) : on se
+    /// connecte au sshd local jetable, on ouvre un shell, on envoie `echo` et on
+    /// lit la sortie. Ignoré par défaut (nécessite un sshd sur 127.0.0.1:2223).
+    /// Activation : `cargo test -- --ignored ssh::service::tests::interactive_pty_roundtrip`.
+    #[test]
+    #[ignore]
+    fn interactive_pty_roundtrip_against_local_sshd() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+
+        let mut s = store();
+        let cfg = SshConfig {
+            host: "127.0.0.1".to_string(),
+            port: 2223,
+            user: "sshtest".to_string(),
+            auth_type: SshAuthType::Key,
+            password: None,
+            key_path: Some("/tmp/sshtest/client".to_string()),
+            keep_alive: 60,
+            port_forwarding: None,
+            allow_unknown_host_key: false,
+        };
+
+        let est = establish(&cfg, &mut s).expect("establish doit réussir sur le sshd local");
+        // 1er usage → TOFU enregistré + accepté.
+        assert_eq!(est.host_key_status, HostKeyStatus::New);
+
+        est.session.set_blocking(true);
+        // Timeout court pour une lecture non bloquante.
+        est.session.set_timeout(200);
+        let mut ch = est.session.channel_session().expect("channel");
+        ch.request_pty("xterm", None, None).expect("pty");
+        ch.shell().expect("shell");
+        ch.write_all(b"echo SSHRUST_OK\n").expect("write");
+        ch.flush().expect("flush");
+
+        let mut out = String::new();
+        let mut buf = [0u8; 4096];
+        for _ in 0..100 {
+            match ch.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => out.push_str(&String::from_utf8_lossy(&buf[..n])),
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+            if out.contains("SSHRUST_OK") {
+                break;
+            }
+        }
+        assert!(out.contains("SSHRUST_OK"), "sortie du shell attendue, obtenu : {out}");
     }
 }

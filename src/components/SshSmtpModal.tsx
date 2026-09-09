@@ -31,6 +31,7 @@ import {
   sshDeleteProfile,
   SshConfig,
   SshProfile,
+  SshConnectionInfo,
 } from '../lib/sshApi';
 import {
   smtpTestConnection,
@@ -45,6 +46,7 @@ import {
 interface SshSmtpModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onSshConnected?: (info: SshConnectionInfo) => void;
 }
 
 type StatusPhase = 'idle' | 'running' | 'success' | 'error';
@@ -57,7 +59,7 @@ interface Status {
 
 const IDLE: Status = { phase: 'idle', message: '' };
 
-export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) => {
+export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose, onSshConnected }) => {
   const [activeTab, setActiveTab] = useState<'ssh' | 'smtp'>('ssh');
 
   // SSH Form State
@@ -71,6 +73,7 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
   const [sshPortForwarding, setSshPortForwarding] = useState('');
   const [sshStatus, setSshStatus] = useState<Status>(IDLE);
   const [sshConnected, setSshConnected] = useState(false);
+  const [sshAllowUnknown, setSshAllowUnknown] = useState(false);
   const [sshProfiles, setSshProfiles] = useState<SshProfile[]>([]);
   const [sshProfileName, setSshProfileName] = useState('');
 
@@ -156,6 +159,7 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
     keyPath: sshKeyPath.trim() || undefined,
     keepAlive: parsePort(sshKeepAlive, 60),
     portForwarding: sshPortForwarding.trim() || undefined,
+    allowUnknownHostKey: sshAllowUnknown,
   });
 
   const buildSmtpConfig = (): SmtpConfig => ({
@@ -172,6 +176,16 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // ---------------- SSH handlers ----------------
+  const hostKeyText = (s: string, fp?: string): string => {
+    const label =
+      s === 'new'
+        ? 'Nouvelle clé d\'hôte enregistrée (TOFU)'
+        : s === 'verified'
+        ? 'Clé d\'hôte vérifiée'
+        : '⚠ Clé d\'hôte modifiée (autorisée)';
+    return fp ? `${label} · SHA-256 ${fp.slice(0, 16)}…` : label;
+  };
+
   const handleTestSsh = async () => {
     setSshStatus({ phase: 'running', message: `Test de connexion SSH vers ${sshHost}:${sshPort}...` });
     try {
@@ -179,7 +193,9 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
       setSshStatus({
         phase: 'success',
         message: res.message,
-        detail: res.serverBanner ? `Bannière serveur : ${res.serverBanner}` : undefined,
+        detail: [res.serverBanner ? `Bannière : ${res.serverBanner}` : undefined, hostKeyText(res.hostKeyStatus, res.hostKeyFingerprint)]
+          .filter(Boolean)
+          .join('\n'),
       });
     } catch (e) {
       setSshStatus({ phase: 'error', message: 'Test de connexion échoué', detail: errMsg(e) });
@@ -194,8 +210,13 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
       setSshStatus({
         phase: 'success',
         message: res.message,
-        detail: res.serverBanner ? `Bannière serveur : ${res.serverBanner}` : undefined,
+        detail: [res.serverBanner ? `Bannière : ${res.serverBanner}` : undefined, hostKeyText(res.hostKeyStatus, res.hostKeyFingerprint)]
+          .filter(Boolean)
+          .join('\n'),
       });
+      // Ouvre la session interactive dans le terminal, puis referme la modale.
+      onSshConnected?.(res);
+      onClose();
     } catch (e) {
       setSshConnected(false);
       setSshStatus({ phase: 'error', message: 'Connexion SSH échouée', detail: errMsg(e) });
@@ -610,6 +631,16 @@ export const SshSmtpModal: React.FC<SshSmtpModalProps> = ({ isOpen, onClose }) =
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 text-zinc-400 text-[11px] font-mono cursor-pointer select-none pt-1">
+                <input
+                  type="checkbox"
+                  checked={sshAllowUnknown}
+                  onChange={(e) => setSshAllowUnknown(e.target.checked)}
+                  className="accent-emerald-500"
+                />
+                Autoriser une clé d'hôte inconnue / modifiée (dégrade la protection TOFU)
+              </label>
 
               {statusBox(sshStatus)}
               {sshConnected && (

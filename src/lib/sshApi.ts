@@ -9,6 +9,7 @@ import { tauriInvoke, isTauriEnvironment } from './tauriBridge';
  */
 
 export type SshAuthType = 'key' | 'password';
+export type HostKeyStatus = 'new' | 'verified' | 'changed';
 
 export interface SshConfig {
   host: string;
@@ -19,6 +20,7 @@ export interface SshConfig {
   keyPath?: string;
   keepAlive: number;
   portForwarding?: string;
+  allowUnknownHostKey?: boolean;
 }
 
 export interface SshConnectionInfo {
@@ -28,6 +30,8 @@ export interface SshConnectionInfo {
   user: string;
   authType: SshAuthType;
   serverBanner?: string;
+  hostKeyFingerprint?: string;
+  hostKeyStatus: HostKeyStatus;
   message: string;
 }
 
@@ -62,9 +66,30 @@ export async function sshTestConnection(config: SshConfig): Promise<SshConnectio
   return tauriInvoke<SshConnectionInfo>('ssh_test_connection', { config });
 }
 
+/** Établit une véritable session SSH interactive (PTY + shell). */
 export async function sshConnect(config: SshConfig): Promise<SshConnectionInfo> {
   nativeBackend('ssh_connect');
   return tauriInvoke<SshConnectionInfo>('ssh_connect', { config });
+}
+
+/** Envoie une frappe clavier (octets) à la session interactive. */
+export async function sshSessionWrite(data: Uint8Array): Promise<void> {
+  nativeBackend('ssh_session_write');
+  await tauriInvoke('ssh_session_write', { data: Array.from(data) });
+}
+
+/** Écoute la sortie distante de la session interactive (event Tauri). */
+export function sshListenSessionOutput(cb: (text: string) => void): () => void {
+  if (!isTauriEnvironment()) return () => {};
+  let unlisten: (() => void) | null = null;
+  import('@tauri-apps/api/event')
+    .then(({ listen }) =>
+      listen<string>('ssh:session-output', (e) => cb(e.payload)).then((u) => {
+        unlisten = u;
+      })
+    )
+    .catch(() => {});
+  return () => unlisten?.();
 }
 
 export async function sshDisconnect(): Promise<void> {

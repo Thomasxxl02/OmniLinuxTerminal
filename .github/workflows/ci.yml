@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Rust : compile + tests reproductibles grâce à src-tauri/Cargo.lock versionné.
+  rust:
+    name: Rust (build --locked + test --locked)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri v2 Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev libayatana-appindicator3-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # tauri-build(embed_frontend) exige que le dossier frontendDist existe.
+      - name: Create frontendDist placeholder (for Rust-only check)
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><html><body>CI stub</body></html>' > dist/index.html
+
+      - name: cargo build --locked
+        working-directory: src-tauri
+        run: cargo build --locked
+
+      - name: cargo test --locked
+        working-directory: src-tauri
+        run: cargo test --locked
+
+  # Frontend : contrôle TypeScript.
+  frontend:
+    name: Frontend (tsc + build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npx vite build

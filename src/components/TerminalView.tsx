@@ -1,9 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle } from '../types';
 import { LINUX_DISTROS } from '../data/distros';
 import { runTerminalCommand, applyTerminalResult } from '../lib/tauriBridge';
 import { playTerminalSound } from '../lib/soundEffects';
 import { Copy, Trash2, Terminal as TerminalIcon, Sparkles } from 'lucide-react';
+
+export interface SshSessionState {
+  connected: boolean;
+  host: string;
+  user: string;
+  output: string;
+}
 
 interface TerminalViewProps {
   tab: TerminalTab;
@@ -12,6 +19,9 @@ interface TerminalViewProps {
   soundEnabled: boolean;
   soundStyle?: TerminalSoundStyle;
   onUpdateTab: (updated: Partial<TerminalTab>) => void;
+  sshSession?: SshSessionState | null;
+  onSshKey?: (bytes: number[]) => void;
+  onSshDisconnect?: () => void;
 }
 
 export const TerminalView: React.FC<TerminalViewProps> = ({
@@ -21,6 +31,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   soundEnabled,
   soundStyle = 'mechanical',
   onUpdateTab,
+  sshSession,
+  onSshKey,
+  onSshDisconnect,
 }) => {
   const [inputVal, setInputVal] = useState('');
   const [historyIdx, setHistoryIdx] = useState<number>(-1);
@@ -146,6 +159,82 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       return;
     }
   };
+
+  const sshOutRef = useRef<HTMLPreElement | null>(null);
+  const sshInRef = useRef<HTMLInputElement | null>(null);
+
+  // Scroll automatique en bas à chaque nouvelle sortie SSH.
+  useEffect(() => {
+    if (sshSession?.connected && sshOutRef.current) {
+      sshOutRef.current.scrollTop = sshOutRef.current.scrollHeight;
+    }
+  }, [sshSession?.output, sshSession?.connected]);
+
+  // Convertit un événement clavier en octets à envoyer (PTY BRUT, pas de prompt local).
+  const handleSshKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      const key = e.key;
+      let bytes: number[] = [];
+      if (key === 'Enter') bytes = [13];
+      else if (key === 'Backspace') bytes = [127];
+      else if (key === 'Tab') bytes = [9];
+      else if (key === 'ArrowUp') bytes = [27, 91, 65];
+      else if (key === 'ArrowDown') bytes = [27, 91, 66];
+      else if (key === 'ArrowRight') bytes = [27, 91, 67];
+      else if (key === 'ArrowLeft') bytes = [27, 91, 68];
+      else if (e.ctrlKey && key.toLowerCase() === 'c') bytes = [3];
+      else if (e.ctrlKey && key.toLowerCase() === 'd') bytes = [4];
+      else if (e.ctrlKey && key.toLowerCase() === 'l') bytes = [12];
+      else if (e.ctrlKey) bytes = [];
+      else if (key.length === 1) bytes = [key.charCodeAt(0)];
+
+      if (bytes.length && onSshKey) {
+        e.preventDefault();
+        onSshKey(bytes);
+      } else if (key === 'Enter' || key.startsWith('Arrow')) {
+        e.preventDefault();
+      }
+    },
+    [onSshKey]
+  );
+
+  // Mode SSH interactif : passthrough clavier → hôte, sortie affichée telle quelle.
+  if (sshSession?.connected) {
+    return (
+      <div
+        className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed select-text cursor-text relative flex flex-col"
+        style={{ backgroundColor: theme.bg, color: theme.fg, fontSize: `${fontSize}px` }}
+        onClick={() => sshInRef.current?.focus()}
+      >
+        <div className="flex items-center justify-between mb-3 text-[11px] border-b border-zinc-800 pb-2">
+          <span className="flex items-center gap-2 text-emerald-400 font-bold">
+            <TerminalIcon className="w-3.5 h-3.5" />
+            Session SSH interactive — {sshSession.user}@{sshSession.host}
+          </span>
+          <button
+            onClick={onSshDisconnect}
+            className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-medium"
+          >
+            Déconnecter
+          </button>
+        </div>
+        <pre
+          ref={sshOutRef}
+          className="whitespace-pre-wrap break-all flex-1 font-mono"
+          style={{ color: theme.fg }}
+        >
+          {sshSession.output}
+        </pre>
+        <input
+          ref={sshInRef}
+          autoFocus
+          onKeyDown={handleSshKeyDown}
+          className="absolute opacity-0 w-0 h-0"
+          aria-label="Clavier de session SSH"
+        />
+      </div>
+    );
+  }
 
   // Render Prompt Prefix
   const renderPromptSymbol = (tabCwd: string = tab.cwd) => {

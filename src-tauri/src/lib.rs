@@ -369,6 +369,7 @@ pub fn run() {
         ssh::commands::ssh_validate_config,
         ssh::commands::ssh_test_connection,
         ssh::commands::ssh_connect,
+        ssh::commands::ssh_session_write,
         ssh::commands::ssh_disconnect,
         ssh::commands::ssh_is_connected,
         ssh::commands::ssh_list_profiles,

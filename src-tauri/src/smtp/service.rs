@@ -5,7 +5,11 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::transport::smtp::client::{Tls, TlsParameters};
 use lettre::{Message, SmtpTransport, Transport};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use uuid::Uuid;
+
+/// Timeout réseau SMTP par défaut.
+const SMTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Validation structurée de la configuration SMTP.
 pub fn validate(config: &SmtpConfig) -> Result<(), AppError> {
@@ -37,6 +41,7 @@ fn build_transport(config: &SmtpConfig) -> Result<SmtpTransport, AppError> {
 
     let mut builder = SmtpTransport::builder_dangerous(&config.host)
         .port(config.port)
+        .timeout(Some(SMTP_TIMEOUT))
         .tls(tls);
 
     if let (Some(user), Some(password)) = (&config.user, &config.password) {

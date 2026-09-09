@@ -1,58 +1,180 @@
 use crate::models::AppError;
+use crate::ssh::known_hosts::KnownHostsStore;
 use crate::ssh::models::{SshConfig, SshConnectionInfo, SshProfile};
 use crate::ssh::service;
 use chrono::Utc;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-/// Gestionnaire des connexions SSH persistantes + profils.
+/// Poignée d'une session SSH interactive.
+struct InteractiveHandle {
+    input: mpsc::Sender<Vec<u8>>,
+    shutdown: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+/// Gestionnaire des connexions SSH (test, connexion interactive, profils) et
+/// du registre TOFU des clés d'hôte.
 ///
-/// La session SSH authentifiée est conservée ouverte tant que la connexion est
-/// active. Les secrets (mot de passe) ne transitent que par la config transmise
-/// à `connect`/`test`, sont utilisés une fois puis abandonnés : ils ne sont
+/// Les secrets (mot de passe) ne transitent que par la config transmise à
+/// `connect`/`test`, sont utilisés une fois puis abandonnés : ils ne sont
 /// **jamais** écrits sur disque ni renvoyés au frontend.
 pub struct SshManager {
     profile_path: PathBuf,
-    session: Mutex<Option<ssh2::Session>>,
+    known_hosts: Mutex<KnownHostsStore>,
+    session: Mutex<Option<InteractiveHandle>>,
 }
 
 impl SshManager {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             profile_path: data_dir.join("ssh_profiles.json"),
+            known_hosts: Mutex::new(KnownHostsStore::new(data_dir)),
             session: Mutex::new(None),
         }
     }
 
-    /// Établit une connexion SSH **réelle** (TCP + handshake + auth), configure
-    /// le keep-alive et conserve la session ouverte. Retourne la bannière.
-    pub fn connect(&self, config: &SshConfig) -> Result<SshConnectionInfo, AppError> {
-        let (session, banner) = service::establish(config)?;
-        // Configure le keep-alive SSH (envoyé par libssh2 pendant les opérations).
-        let interval = config.keep_alive.max(15) as u32;
-        session.set_keepalive(true, interval);
-
-        // Remplace toute session précédente (ferme l'ancienne socket).
-        *self.session.lock().unwrap() = Some(session);
-
-        Ok(SshConnectionInfo {
-            ok: true,
-            host: config.host.clone(),
-            port: config.port,
-            user: config.user.clone(),
-            auth_type: config.auth_type,
-            server_banner: banner,
-            message: format!(
-                "Connexion SSH établie avec succès sur {}:{}",
-                config.host, config.port
-            ),
-        })
+    /// Test de connexion : TCP + handshake + auth + vérification TOFU, puis ferme la session.
+    pub fn test_connection(&self, config: &SshConfig) -> Result<SshConnectionInfo, AppError> {
+        let mut known = self.known_hosts.lock().unwrap();
+        let est = service::establish(config, &mut known)?;
+        Ok(service::to_info(config, &est))
     }
 
-    /// Ferme la session SSH active (libère la socket).
+    /// Établit une **vraie session SSH interactive** : authentifie, ouvre un canal
+    /// avec PTY + shell, et streame la sortie vers le frontend (event
+    /// `ssh:session-output`) pendant que le frontend envoie les frappes via
+    /// `session_write`. Retourne l'info de connexion (dont l'état TOFU).
+    pub fn connect(&self, config: &SshConfig, app: AppHandle) -> Result<SshConnectionInfo, AppError> {
+        let mut known = self.known_hosts.lock().unwrap();
+        let est = service::establish(config, &mut known)?;
+        let info = service::to_info(config, &est);
+
+        // Ferme toute session précédente.
+        if let Some(old) = self.session.lock().unwrap().take() {
+            old.shutdown.store(true, Ordering::Relaxed);
+            if let Some(j) = old.join {
+                let _ = j.join();
+            }
+        }
+
+        let interval = (config.keep_alive.max(15) as u64).max(30);
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let flag = shutdown.clone();
+        let app2 = app.clone();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
+
+        let join = std::thread::spawn(move || {
+            let session = est.session;
+            session.set_blocking(true);
+            session.set_keepalive(true, interval as u32);
+
+            // Ouverture du canal interactif (PTY + shell).
+            let mut channel = match session.channel_session() {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e.to_string()));
+                    return;
+                }
+            };
+            if let Err(e) = channel.request_pty("xterm", None, None) {
+                let _ = ready_tx.send(Err(e.to_string()));
+                return;
+            }
+            if let Err(e) = channel.shell() {
+                let _ = ready_tx.send(Err(e.to_string()));
+                return;
+            }
+            let _ = ready_tx.send(Ok(()));
+
+            // Lecture non bloquante (timeout court) pour la boucle interactive.
+            session.set_timeout(50);
+
+            let mut buf = [0u8; 8192];
+            loop {
+                if flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                // Envoi des frappes clavier vers le canal.
+                loop {
+                    match rx.try_recv() {
+                        Ok(chunk) => {
+                            if channel.write_all(&chunk).is_err() || channel.flush().is_err() {
+                                break;
+                            }
+                        }
+                        Err(mpsc::TryRecvError::Empty) | Err(mpsc::TryRecvError::Disconnected) => break,
+                    }
+                }
+                // Lecture de la sortie distante.
+                match channel.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let s = String::from_utf8_lossy(&buf[..n]).to_string();
+                        let _ = app2.emit("ssh:session-output", s);
+                    }
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut => {}
+                    Err(_) => break,
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            // channel + session libérés ici.
+        });
+
+        // Attend la préparation du canal interactif (sinon on retourne l'erreur).
+        let setup = ready_rx
+            .recv_timeout(Duration::from_secs(15))
+            .map_err(|_| AppError::new("ssh_session", "Délai d'initialisation de la session dépassé"))?;
+
+        match setup {
+            Ok(()) => {
+                *self.session.lock().unwrap() = Some(InteractiveHandle {
+                    input: tx,
+                    shutdown,
+                    join: Some(join),
+                });
+            }
+            Err(e) => {
+                shutdown.store(true, Ordering::Relaxed);
+                let _ = join.join();
+                return Err(AppError::with_details(
+                    "ssh_session",
+                    "Échec d'ouverture de la session SSH interactive",
+                    e,
+                ));
+            }
+        }
+
+        Ok(info)
+    }
+
+    /// Envoie une chaîne de frappes clavier à la session interactive active.
+    pub fn session_write(&self, data: Vec<u8>) -> Result<(), AppError> {
+        let handle = self.session.lock().unwrap();
+        let h = handle
+            .as_ref()
+            .ok_or_else(|| AppError::new("ssh_session", "Aucune session SSH active"))?;
+        h.input
+            .send(data)
+            .map_err(|_| AppError::new("ssh_session", "Canal de session fermé"))
+    }
+
+    /// Ferme la session SSH active (annulation).
     pub fn disconnect(&self) -> Result<(), AppError> {
-        *self.session.lock().unwrap() = None;
+        if let Some(handle) = self.session.lock().unwrap().take() {
+            handle.shutdown.store(true, Ordering::Relaxed);
+            if let Some(j) = handle.join {
+                let _ = j.join();
+            }
+        }
         Ok(())
     }
 
