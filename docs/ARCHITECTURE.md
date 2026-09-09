@@ -139,3 +139,16 @@ Retirer `unsafe-eval` de la CSP ; limiter `connect-src` ; supprimer Express + de
 
 ## 6. Garde-fous sécurité (appliqués récemment)
 `server.ts` bindé `127.0.0.1` (plus de 0.0.0.0), `express.json({ limit: '2mb' })`, handler d'erreurs sans fuite de stack.
+
+---
+
+## 7. Advisory de dépendance connu (à suivre)
+
+### `glib` (transitif, pile GTK du webview Tauri) — Dependabot #1
+- **Sévérité** : moyenne · **Correctif** : `glib >= 0.20`
+- **Faille** : *unsoundness* dans `glib::VariantStrIter` (`impl_get`) → comportement indéfini.
+- **Pourquoi non corrigé** : la pile épinglée est en gtk-rs **0.18** (`glib 0.18.5`, `gtk 0.18.2`,
+  `webkit2gtk 2.0.2`, `soup3 0.5`) ; `tauri 2.11.5` / `wry 0.55.1` imposent `gtk ^0.18`.
+  Un bump de `glib` seul échoue en résolution : `failed to select a version for requirement glib = "^0.18"`.
+- **Impact** : chemin de code interne des binding GTK,**non atteint** par un terminal + webview ;
+  risque d'exploitation quasi nul. Le correctif arrivera avec la migration `tauri`/`wry` vers gtk-rs 0.20.
