@@ -1,42 +1,25 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TerminalTab, TerminalTheme, DistroId, TerminalSoundStyle, AiConfig } from './types';
-import { useDistros, resolveDistro } from './lib/distroStore';
+import { LINUX_DISTROS, DEFAULT_DISTRO } from './data/distros';
 import { TERMINAL_THEMES, DEFAULT_THEME } from './data/themes';
 import { MenuBar } from './components/MenuBar';
 import { TerminalHeader } from './components/TerminalHeader';
-import { TerminalView, SshSessionState } from './components/TerminalView';
-import { sshListenSessionOutput, sshSessionWrite, sshDisconnect, SshConnectionInfo } from './lib/sshApi';
-import { aiGenerate, aiExplain, aiDebug, aiErrorMessage } from './lib/aiApi';
-import { getSettings, updateSetting } from './lib/settingsApi';
-import { saveSessionFromTabs, loadSessionTabs } from './lib/sessionApi';
+import { TerminalView } from './components/TerminalView';
+import { NanoEditor } from './components/NanoEditor';
+import { VimEditor } from './components/VimEditor';
+import { HtopMonitor } from './components/HtopMonitor';
+import { CmatrixCanvas } from './components/CmatrixCanvas';
+import { SlAnimation } from './components/SlAnimation';
+import { AiCopilotDrawer } from './components/AiCopilotDrawer';
+import { AiConfigModal } from './components/AiConfigModal';
+import { ThemeSelectorModal } from './components/ThemeSelectorModal';
+import { DistroInfoModal } from './components/DistroInfoModal';
+import { HelpModal } from './components/HelpModal';
+import { AboutModal } from './components/AboutModal';
+import { TauriArchitectureModal } from './components/TauriArchitectureModal';
+import { SshSmtpModal } from './components/SshSmtpModal';
+import { runTerminalCommand, applyTerminalResult } from './lib/tauriBridge';
 import { fsReset, fsExport, fsImport, fsUpdateOSRelease, errMsg } from './lib/fsApi';
-import { useTerminalController } from './hooks/useTerminalController';
-import { RiskConfirmModal } from './components/RiskConfirmModal';
-
-// ==== Fenêtres lourdes chargées à la demande (React.lazy) ====
-// Réduit le bundle initial : chaque fenêtre (éditeurs, moniteurs, modales,
-// gestionnaire réseau) n'est chargée qu'à son ouverture.
-const NanoEditor = lazy(() => import('./components/NanoEditor').then((m) => ({ default: m.NanoEditor })));
-const VimEditor = lazy(() => import('./components/VimEditor').then((m) => ({ default: m.VimEditor })));
-const HtopMonitor = lazy(() => import('./components/HtopMonitor').then((m) => ({ default: m.HtopMonitor })));
-const CmatrixCanvas = lazy(() => import('./components/CmatrixCanvas').then((m) => ({ default: m.CmatrixCanvas })));
-const SlAnimation = lazy(() => import('./components/SlAnimation').then((m) => ({ default: m.SlAnimation })));
-const AiCopilotDrawer = lazy(() => import('./components/AiCopilotDrawer').then((m) => ({ default: m.AiCopilotDrawer })));
-const AiConfigModal = lazy(() => import('./components/AiConfigModal').then((m) => ({ default: m.AiConfigModal })));
-const ThemeSelectorModal = lazy(() => import('./components/ThemeSelectorModal').then((m) => ({ default: m.ThemeSelectorModal })));
-const DistroInfoModal = lazy(() => import('./components/DistroInfoModal').then((m) => ({ default: m.DistroInfoModal })));
-const HelpModal = lazy(() => import('./components/HelpModal').then((m) => ({ default: m.HelpModal })));
-const AboutModal = lazy(() => import('./components/AboutModal').then((m) => ({ default: m.AboutModal })));
-const TauriArchitectureModal = lazy(() => import('./components/TauriArchitectureModal').then((m) => ({ default: m.TauriArchitectureModal })));
-const ConnectionManagerModal = lazy(() => import('./components/network/ConnectionManagerModal').then((m) => ({ default: m.ConnectionManagerModal })));
-
-// Fallback des fenêtres lazy (modal / workspace).
-const modalFallback = (
-  <div className="flex items-center justify-center h-40 text-zinc-500 text-xs font-mono">Chargement…</div>
-);
-const workspaceFallback = (
-  <div className="flex items-center justify-center h-full text-zinc-500 text-xs font-mono">Chargement…</div>
-);
 
 export default function App() {
   // Theme & Appearance State
@@ -52,28 +35,12 @@ export default function App() {
   });
   const [fontSize, setFontSize] = useState<number>(13);
 
-  // --- Réglages persistés via le store Rust (source de vérité) ---
+  // Sync soundStyle to localStorage
   const handleSelectSoundStyle = (style: TerminalSoundStyle) => {
     setSoundStyle(style);
-    updateSetting('soundStyle', style).catch(() => {});
-  };
-  const handleToggleCrt = () => {
-    const v = !crtEffect;
-    setCrtEffect(v);
-    updateSetting('crtEffect', v).catch(() => {});
-  };
-  const handleToggleSound = () => {
-    const v = !soundEnabled;
-    setSoundEnabled(v);
-    updateSetting('soundEnabled', v).catch(() => {});
-  };
-  const handleChangeFontSize = (n: number) => {
-    setFontSize(n);
-    updateSetting('fontSize', n).catch(() => {});
-  };
-  const handleSelectThemeFull = (t: TerminalTheme) => {
-    setTheme(t);
-    updateSetting('themeId', t.id).catch(() => {});
+    try {
+      localStorage.setItem('omnilinux_sound_style', style);
+    } catch {}
   };
 
   // Tabs State
@@ -105,28 +72,6 @@ export default function App() {
   const [tauriModalOpen, setTauriModalOpen] = useState<boolean>(false);
   const [sshSmtpModalOpen, setSshSmtpModalOpen] = useState<boolean>(false);
 
-  // ------ Session SSH interactive (état + stream de sortie) ------
-  const [sshSession, setSshSession] = useState<SshSessionState | null>(null);
-  const sshOutBuf = useRef('');
-  useEffect(() => {
-    const un = sshListenSessionOutput((text) => {
-      sshOutBuf.current += text;
-      setSshSession((prev) => (prev ? { ...prev, output: prev.output + text } : prev));
-    });
-    return un;
-  }, []);
-
-  const handleSshConnected = (info: SshConnectionInfo) => {
-    setSshSession({ connected: true, host: info.host, user: info.user, output: sshOutBuf.current });
-  };
-  const handleSshKey = (bytes: number[]) => {
-    sshSessionWrite(new Uint8Array(bytes)).catch(() => {});
-  };
-  const handleSshDisconnect = () => {
-    sshDisconnect().catch(() => {});
-    setSshSession(null);
-  };
-
   // Gemini AI Model & API Key Configuration State
   const [aiConfig, setAiConfig] = useState<AiConfig>(() => {
     try {
@@ -157,99 +102,23 @@ export default function App() {
     };
   });
 
-  // Règle « secrets en mémoire » : on ne persiste jamais les clés API
-  // (apiKeys, customApiKey) — uniquement la config non sensible.
-  const persistAiConfig = (config: AiConfig) => {
-    const nonSecret = { ...config };
-    delete nonSecret.apiKeys;
-    delete nonSecret.customApiKey;
-    updateSetting('aiConfig', nonSecret).catch(() => {});
-  };
-
   const handleSaveAiConfig = (newConfig: AiConfig) => {
     setAiConfig(newConfig);
-    persistAiConfig(newConfig);
+    try {
+      localStorage.setItem('omnilinux_ai_config', JSON.stringify(newConfig));
+    } catch {}
   };
 
   const handleSelectAiModel = (modelId: string) => {
     const updated = { ...aiConfig, model: modelId };
     setAiConfig(updated);
-    persistAiConfig(updated);
+    try {
+      localStorage.setItem('omnilinux_ai_config', JSON.stringify(updated));
+    } catch {}
   };
 
-  // Hydratation depuis le store Rust (source de vérité) + migration des anciens
-  // réglages localStorage. Les secrets ne sont jamais persistés.
-  useEffect(() => {
-    let mounted = true;
-    getSettings()
-      .then((s) => {
-        if (!mounted) return;
-        const legacySound = localStorage.getItem('omnilinux_sound_style');
-        const legacyAi = localStorage.getItem('omnilinux_ai_config');
-
-        if (typeof s.themeId === 'string') {
-          const t = TERMINAL_THEMES.find((th) => th.id === s.themeId);
-          if (t) setTheme(t);
-        }
-        if (typeof s.crtEffect === 'boolean') setCrtEffect(s.crtEffect);
-        if (typeof s.soundEnabled === 'boolean') setSoundEnabled(s.soundEnabled);
-        if (typeof s.fontSize === 'number') setFontSize(s.fontSize);
-
-        if (typeof s.soundStyle === 'string') setSoundStyle(s.soundStyle as TerminalSoundStyle);
-        else if (legacySound) {
-          setSoundStyle(legacySound as TerminalSoundStyle);
-          updateSetting('soundStyle', legacySound).catch(() => {});
-        }
-
-        if (s.aiConfig && typeof s.aiConfig === 'object') {
-          setAiConfig((prev) => ({ ...prev, ...(s.aiConfig as Partial<AiConfig>) }));
-        } else if (legacyAi) {
-          try {
-            const parsed = JSON.parse(legacyAi) || {};
-            const nonSecret = { ...parsed };
-            delete nonSecret.apiKeys;
-            delete nonSecret.customApiKey;
-            setAiConfig((prev) => ({ ...prev, ...(nonSecret as Partial<AiConfig>) }));
-            updateSetting('aiConfig', nonSecret).catch(() => {});
-          } catch {}
-        }
-
-        // Secrets jamais persistés : purge du stockage local historique.
-        try { localStorage.removeItem('omnilinux_sound_style'); } catch {}
-        try { localStorage.removeItem('omnilinux_ai_config'); } catch {}
-      })
-      .catch(() => {});
-    return () => { mounted = false; };
-  }, []);
-
-  // Hydratation de la session (onglets) depuis le store Rust + sauvegarde auto.
-  const sessionHydrated = useRef(false);
-  useEffect(() => {
-    let mounted = true;
-    loadSessionTabs()
-      .then((s) => {
-        if (!mounted) return;
-        if (s) {
-          setTabs(s.tabs);
-          setActiveTabId(s.activeTabId);
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (mounted) sessionHydrated.current = true;
-      });
-    return () => { mounted = false; };
-  }, []);
-
-  useEffect(() => {
-    if (sessionHydrated.current) {
-      saveSessionFromTabs(tabs, activeTabId).catch(() => {});
-    }
-  }, [tabs, activeTabId]);
-
-  const distros = useDistros();
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
-  const activeDistro = resolveDistro(distros, activeTab.distroId);
+  const activeDistro = LINUX_DISTROS.find((d) => d.id === activeTab.distroId) || DEFAULT_DISTRO;
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -278,7 +147,7 @@ export default function App() {
 
   // New Tab Handler
   const handleNewTab = (distroId: DistroId = activeTab.distroId) => {
-    const distro = resolveDistro(distros, distroId);
+    const distro = LINUX_DISTROS.find((d) => d.id === distroId) || DEFAULT_DISTRO;
     const newTabId = `tab-${Date.now()}`;
     const newTab: TerminalTab = {
       id: newTabId,
@@ -330,9 +199,6 @@ export default function App() {
     );
   };
 
-  // Contrôleur d'exécution de commande (source unique, partagé avec le terminal).
-  const controller = useTerminalController(handleUpdateTab);
-
   // Clear Terminal Screen
   const handleClearTerminal = () => {
     handleUpdateTab({ history: [] });
@@ -368,9 +234,23 @@ export default function App() {
     }
   };
 
-  // Run a quick predefined command in the terminal (via le contrôleur unifié).
+  // Run a quick predefined command in the terminal
   const handleRunQuickCommand = async (cmd: string) => {
-    await controller.runCommand(cmd, activeTab);
+    const inputLineId = `cmd-${Date.now()}`;
+    const newHistory = [
+      ...activeTab.history,
+      {
+        id: inputLineId,
+        type: 'input' as const,
+        content: cmd,
+        cwd: activeTab.cwd,
+        distroId: activeTab.distroId,
+      },
+    ];
+    const updatedCmdHistory = [...activeTab.commandHistory, cmd];
+
+    const result = await runTerminalCommand(cmd, activeTab.cwd, activeTab.distroId);
+    handleUpdateTab(applyTerminalResult(result, activeTab, newHistory, updatedCmdHistory));
   };
 
   // Réinitialiser le système de fichiers (backend Rust)
@@ -466,7 +346,6 @@ export default function App() {
   const handleSelectThemeById = (themeId: string) => {
     const found = TERMINAL_THEMES.find((t) => t.id === themeId);
     if (found) setTheme(found);
-    updateSetting('themeId', themeId).catch(() => {});
   };
 
   // Import VFS JSON Handler (Rust VFS)
@@ -519,7 +398,7 @@ export default function App() {
 
   // Select Distro for Current Tab (Rust VFS: met à jour /etc/os-release)
   const handleSelectDistro = async (distroId: DistroId) => {
-    const distro = distros.find((d) => d.id === distroId);
+    const distro = LINUX_DISTROS.find((d) => d.id === distroId);
     try {
       await fsUpdateOSRelease(distro?.name || 'Linux', distro?.version || '1.0');
     } catch (e: any) {
@@ -539,44 +418,70 @@ export default function App() {
     }
   };
 
-  // Execute AI Suggested Command directly into terminal prompt (exécution réelle).
+  // Execute AI Suggsted Command directly into terminal prompt
   const handleExecuteCommandFromAi = (command: string) => {
-    void controller.runCommand(command, activeTab);
+    handleUpdateTab({
+      history: [
+        ...activeTab.history,
+        {
+          id: `ai-cmd-${Date.now()}`,
+          type: 'input',
+          content: command,
+          cwd: activeTab.cwd,
+          distroId: activeTab.distroId,
+        },
+      ],
+      commandHistory: [...activeTab.commandHistory, command],
+    });
+
+    // Execute
+    const customKey = aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
+      ? aiConfig.customApiKey.trim()
+      : undefined;
+
+    fetch('/api/ai/generate-command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: command,
+        distro: activeTab.distroId,
+        currentDir: activeTab.cwd,
+        model: aiConfig.model,
+        apiKey: customKey,
+      }),
+    }).catch(() => {});
   };
 
   // AI Request Handler
   const handleAiRequest = async (type: 'generate' | 'explain' | 'debug', query: string) => {
     try {
+      const endpoint =
+        type === 'generate'
+          ? '/api/ai/generate-command'
+          : type === 'explain'
+          ? '/api/ai/explain-command'
+          : '/api/ai/debug-error';
+
       const customKey = aiConfig.isCustomKeyEnabled && aiConfig.customApiKey?.trim()
         ? aiConfig.customApiKey.trim()
         : undefined;
 
-      if (type === 'generate') {
-        return await aiGenerate({
-          prompt: query,
-          distro: activeTab.distroId,
-          currentDir: activeTab.cwd,
-          model: aiConfig.model,
-          apiKey: customKey,
-        });
-      }
-      if (type === 'explain') {
-        return await aiExplain({
-          command: query,
-          distro: activeTab.distroId,
-          model: aiConfig.model,
-          apiKey: customKey,
-        });
-      }
-      return await aiDebug({
-        command: query,
-        errorOutput: '',
-        distro: activeTab.distroId,
-        model: aiConfig.model,
-        apiKey: customKey,
+      const bodyData =
+        type === 'generate'
+          ? { prompt: query, distro: activeTab.distroId, currentDir: activeTab.cwd, model: aiConfig.model, apiKey: customKey }
+          : type === 'explain'
+          ? { command: query, distro: activeTab.distroId, model: aiConfig.model, apiKey: customKey }
+          : { command: query, errorOutput: '', distro: activeTab.distroId, model: aiConfig.model, apiKey: customKey };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyData),
       });
+
+      return await res.json();
     } catch (e: any) {
-      return { error: aiErrorMessage(e) || 'Erreur avec l\'assistant IA.' };
+      return { error: e.message || 'Erreur réseau avec Gemini.' };
     }
   };
 
@@ -608,13 +513,13 @@ export default function App() {
         onToggleAiDrawer={() => setAiDrawerOpen(!aiDrawerOpen)}
         aiDrawerOpen={aiDrawerOpen}
         crtEffect={crtEffect}
-        onToggleCrt={handleToggleCrt}
+        onToggleCrt={() => setCrtEffect(!crtEffect)}
         soundEnabled={soundEnabled}
-        onToggleSound={handleToggleSound}
+        onToggleSound={() => setSoundEnabled(!soundEnabled)}
         soundStyle={soundStyle}
         onSelectSoundStyle={handleSelectSoundStyle}
         fontSize={fontSize}
-        onChangeFontSize={handleChangeFontSize}
+        onChangeFontSize={setFontSize}
         onToggleFullscreen={handleToggleFullscreen}
         onLaunchApp={handleLaunchApp}
         onRunQuickCommand={handleRunQuickCommand}
@@ -641,9 +546,9 @@ export default function App() {
         onOpenSshSmtpModal={() => setSshSmtpModalOpen(true)}
         aiDrawerOpen={aiDrawerOpen}
         crtEffect={crtEffect}
-        onToggleCrt={handleToggleCrt}
+        onToggleCrt={() => setCrtEffect(!crtEffect)}
         soundEnabled={soundEnabled}
-        onToggleSound={handleToggleSound}
+        onToggleSound={() => setSoundEnabled(!soundEnabled)}
         onToggleFullscreen={handleToggleFullscreen}
         onOpenTauriModal={() => setTauriModalOpen(true)}
       />
@@ -653,36 +558,26 @@ export default function App() {
         {/* Terminal Screen / Interactive App */}
         <main className="flex-1 flex flex-col h-full overflow-hidden relative">
           {activeTab.activeEditor?.type === 'nano' ? (
-            <Suspense fallback={workspaceFallback}>
-              <NanoEditor
-                filePath={activeTab.activeEditor.filePath}
-                initialContent={activeTab.activeEditor.fileContent}
-                onClose={() => handleUpdateTab({ activeEditor: null })}
-              />
-            </Suspense>
+            <NanoEditor
+              filePath={activeTab.activeEditor.filePath}
+              initialContent={activeTab.activeEditor.fileContent}
+              onClose={() => handleUpdateTab({ activeEditor: null })}
+            />
           ) : activeTab.activeEditor?.type === 'vim' ? (
-            <Suspense fallback={workspaceFallback}>
-              <VimEditor
-                filePath={activeTab.activeEditor.filePath}
-                initialContent={activeTab.activeEditor.fileContent}
-                onClose={() => handleUpdateTab({ activeEditor: null })}
-              />
-            </Suspense>
+            <VimEditor
+              filePath={activeTab.activeEditor.filePath}
+              initialContent={activeTab.activeEditor.fileContent}
+              onClose={() => handleUpdateTab({ activeEditor: null })}
+            />
           ) : activeTab.activeApp === 'htop' ? (
-            <Suspense fallback={workspaceFallback}>
-              <HtopMonitor
-                distroName={activeDistro.name}
-                onClose={() => handleUpdateTab({ activeApp: 'none' })}
-              />
-            </Suspense>
+            <HtopMonitor
+              distroName={activeDistro.name}
+              onClose={() => handleUpdateTab({ activeApp: 'none' })}
+            />
           ) : activeTab.activeApp === 'matrix' ? (
-            <Suspense fallback={workspaceFallback}>
-              <CmatrixCanvas onClose={() => handleUpdateTab({ activeApp: 'none' })} />
-            </Suspense>
+            <CmatrixCanvas onClose={() => handleUpdateTab({ activeApp: 'none' })} />
           ) : activeTab.activeApp === 'sl' ? (
-            <Suspense fallback={workspaceFallback}>
-              <SlAnimation onClose={() => handleUpdateTab({ activeApp: 'none' })} />
-            </Suspense>
+            <SlAnimation onClose={() => handleUpdateTab({ activeApp: 'none' })} />
           ) : (
             <TerminalView
               tab={activeTab}
@@ -691,9 +586,9 @@ export default function App() {
               soundEnabled={soundEnabled}
               soundStyle={soundStyle}
               onUpdateTab={handleUpdateTab}
-              sshSession={sshSession}
-              onSshKey={handleSshKey}
-              onSshDisconnect={handleSshDisconnect}
+              onIncreaseFontSize={() => setFontSize((prev) => Math.min(prev + 1, 24))}
+              onDecreaseFontSize={() => setFontSize((prev) => Math.max(prev - 1, 10))}
+              onResetFontSize={() => setFontSize(13)}
             />
           )}
 
@@ -705,80 +600,67 @@ export default function App() {
 
         {/* AI Copilot Drawer */}
         {aiDrawerOpen && (
-          <Suspense fallback={modalFallback}>
-            <AiCopilotDrawer
-              distroId={activeTab.distroId}
-              cwd={activeTab.cwd}
-              aiConfig={aiConfig}
-              onOpenAiConfigModal={() => setAiConfigModalOpen(true)}
-              onClose={() => setAiDrawerOpen(false)}
-              onExecuteCommandInTerminal={handleExecuteCommandFromAi}
-            />
-          </Suspense>
+          <AiCopilotDrawer
+            distroId={activeTab.distroId}
+            cwd={activeTab.cwd}
+            aiConfig={aiConfig}
+            onOpenAiConfigModal={() => setAiConfigModalOpen(true)}
+            onClose={() => setAiDrawerOpen(false)}
+            onExecuteCommandInTerminal={handleExecuteCommandFromAi}
+          />
         )}
       </div>
 
       {/* Modals */}
-      <Suspense fallback={modalFallback}>
-        {themeModalOpen && (
-          <ThemeSelectorModal
-            currentTheme={theme}
-            onSelectTheme={handleSelectThemeFull}
-            onClose={() => setThemeModalOpen(false)}
-            crtEffect={crtEffect}
-            onToggleCrt={handleToggleCrt}
-            soundEnabled={soundEnabled}
-            onToggleSound={handleToggleSound}
-            soundStyle={soundStyle}
-            onSelectSoundStyle={handleSelectSoundStyle}
-            fontSize={fontSize}
-            onChangeFontSize={handleChangeFontSize}
-          />
-        )}
+      {themeModalOpen && (
+        <ThemeSelectorModal
+          currentTheme={theme}
+          onSelectTheme={setTheme}
+          onClose={() => setThemeModalOpen(false)}
+          crtEffect={crtEffect}
+          onToggleCrt={() => setCrtEffect(!crtEffect)}
+          soundEnabled={soundEnabled}
+          onToggleSound={() => setSoundEnabled(!soundEnabled)}
+          soundStyle={soundStyle}
+          onSelectSoundStyle={handleSelectSoundStyle}
+          fontSize={fontSize}
+          onChangeFontSize={setFontSize}
+        />
+      )}
 
-        {distroModalOpen && (
-          <DistroInfoModal
-            currentDistroId={activeTab.distroId}
-            onSelectDistro={handleSelectDistro}
-            onClose={() => setDistroModalOpen(false)}
-          />
-        )}
+      {distroModalOpen && (
+        <DistroInfoModal
+          currentDistroId={activeTab.distroId}
+          onSelectDistro={handleSelectDistro}
+          onClose={() => setDistroModalOpen(false)}
+        />
+      )}
 
-        {helpModalOpen && <HelpModal onClose={() => setHelpModalOpen(false)} />}
+      {helpModalOpen && <HelpModal onClose={() => setHelpModalOpen(false)} />}
 
-        {aboutModalOpen && <AboutModal onClose={() => setAboutModalOpen(false)} />}
+      {aboutModalOpen && <AboutModal onClose={() => setAboutModalOpen(false)} />}
 
-        {aiConfigModalOpen && (
-          <AiConfigModal
-            config={aiConfig}
-            isOpen={aiConfigModalOpen}
-            onClose={() => setAiConfigModalOpen(false)}
-            onSave={handleSaveAiConfig}
-          />
-        )}
+      {aiConfigModalOpen && (
+        <AiConfigModal
+          config={aiConfig}
+          isOpen={aiConfigModalOpen}
+          onClose={() => setAiConfigModalOpen(false)}
+          onSave={handleSaveAiConfig}
+        />
+      )}
 
-        {tauriModalOpen && (
-          <TauriArchitectureModal
-            isOpen={tauriModalOpen}
-            onClose={() => setTauriModalOpen(false)}
-          />
-        )}
+      {tauriModalOpen && (
+        <TauriArchitectureModal
+          isOpen={tauriModalOpen}
+          onClose={() => setTauriModalOpen(false)}
+        />
+      )}
 
-        {sshSmtpModalOpen && (
-          <ConnectionManagerModal
-            isOpen={sshSmtpModalOpen}
-            onClose={() => setSshSmtpModalOpen(false)}
-            onSshConnected={handleSshConnected}
-          />
-        )}
-      </Suspense>
-
-      {controller.riskConfirm && (
-        <RiskConfirmModal
-          command={controller.riskConfirm.command}
-          report={controller.riskConfirm.report}
-          onRun={() => void controller.runConfirmed(controller.riskConfirm.command, activeTab)}
-          onCancel={() => controller.dismissRisk()}
+      {sshSmtpModalOpen && (
+        <SshSmtpModal
+          isOpen={sshSmtpModalOpen}
+          onClose={() => setSshSmtpModalOpen(false)}
+          onRunCommand={handleRunQuickCommand}
         />
       )}
     </div>

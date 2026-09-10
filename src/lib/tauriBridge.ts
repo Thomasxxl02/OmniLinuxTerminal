@@ -173,22 +173,35 @@ export function applyTerminalResult(
   tab: TerminalTab,
   newHistory: HistoryLine[],
   cmdHistory: string[],
+  durationMs?: number,
 ): Partial<TerminalTab> {
   if (result.effects.some((e) => e.kind === 'clearScreen')) {
     return { history: [], commandHistory: cmdHistory, activeApp: 'none' };
   }
 
   let finalHistory = newHistory;
+
+  // Attach exitCode and durationMs to the input line if present
+  if (finalHistory.length > 0 && finalHistory[finalHistory.length - 1].type === 'input') {
+    finalHistory[finalHistory.length - 1] = {
+      ...finalHistory[finalHistory.length - 1],
+      exitCode: result.exitCode,
+      durationMs,
+    };
+  }
+
   const outText = result.stdout || result.stderr;
   if (outText) {
     finalHistory = [
-      ...newHistory,
+      ...finalHistory,
       {
         id: `out-${Date.now()}`,
         type: result.exitCode !== 0 ? 'error' : 'output',
         content: outText,
         cwd: result.cwd,
         distroId: tab.distroId,
+        exitCode: result.exitCode,
+        durationMs,
       },
     ];
   }

@@ -76,6 +76,8 @@ export interface HistoryLine {
   distroId?: DistroId;
   cwd?: string;
   commandExecuted?: string;
+  durationMs?: number;
+  exitCode?: number;
 }
 
 export interface ActiveEditorState {
